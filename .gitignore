@@ -1,0 +1,19 @@
+venv
+data
+Python311/*
+saved_models/
+__pycache__
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints
+# Ignore Python bytecode files
+*.pyc
+# Ignore log files
+*.log
+# Ignore environment files
+.env
+# Ignore coverage reports
+.coverage
+# Ignore IDE specific files
+.idea/
+results/
+.vscode/
