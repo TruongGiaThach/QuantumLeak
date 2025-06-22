@@ -24,5 +24,5 @@ class QNN(nn.Module):
         x = torch.nn.functional.normalize(x, p=2, dim=1)
         x = [self.quantum_circuit(x[i], self.q_params) for i in range(batch_size)]
         x = torch.tensor(x, dtype=torch.float32, device=x_device)
-        x = torch.sigmoid(self.post_net(x))
-        return x
+        logits = self.post_net(x)
+        return logits

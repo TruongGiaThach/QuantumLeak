@@ -148,21 +148,36 @@ class ModelExtraction(ABC):
                 print(f"Completed query round {round + 1}/{n_rounds}")
         return query_dataset
 
-    def generate_adversarial_samples(self, model, inputs, targets, epsilon=0.01):
-        model.eval()
-        inputs = inputs.clone().detach().to(self.device)
+    def generate_adversarial_samples(self, substitute_model, inputs, epsilon=0.1):
+        """
+        Tạo mẫu đối kháng dựa trên mô hình thay thế (substitute_model).
+        Phương pháp: Tìm các mẫu gần ranh giới quyết định và thêm nhiễu.
+        Hàm này không dùng nhãn.
+        """
+        substitute_model.eval()
+        inputs_tensor = torch.tensor(inputs, dtype=torch.float32).to(self.device)
+        
         with torch.no_grad():
-            outputs = self.qnnaas_predict(model, inputs, self.device)
-            probs = outputs[:, 1]
+            # Sử dụng mô hình thay thế để tìm các điểm "mong manh"
+            outputs = substitute_model(inputs_tensor) # Giả sử model trả về logits
+            probs = torch.sigmoid(outputs).squeeze()
+
+            # Tìm các mẫu gần ranh giới quyết định (0.5)
             boundary_mask = (probs >= 0.4) & (probs <= 0.6)
-            if not boundary_mask.any():
-                return inputs
-            boundary_inputs = inputs[boundary_mask]
-            noise = epsilon * torch.randn_like(boundary_inputs)
-            adv_inputs = boundary_inputs + noise
-            adv_inputs = torch.clamp(adv_inputs, 0, 1)
-            inputs[boundary_mask] = adv_inputs
-        return inputs
+            
+            # Tạo một bản sao để không thay đổi tensor gốc
+            adv_inputs_tensor = inputs_tensor.clone()
+
+            if boundary_mask.any():
+                # Chỉ thêm nhiễu vào các mẫu gần ranh giới
+                boundary_inputs = adv_inputs_tensor[boundary_mask]
+                noise = epsilon * torch.randn_like(boundary_inputs)
+                perturbed_inputs = boundary_inputs + noise
+                # Giữ các giá trị trong khoảng hợp lệ của ảnh
+                perturbed_inputs = torch.clamp(perturbed_inputs, -1, 1) 
+                adv_inputs_tensor[boundary_mask] = perturbed_inputs
+            
+        return adv_inputs_tensor.cpu().numpy()
 
     @abstractmethod
     def train(self, *args, **kwargs):
@@ -225,72 +240,95 @@ class CloudLeak(ModelExtraction):
             return None
 
     def train(self, query_dataset, out_of_domain_loader, n_epochs=20, batch_size=8, architecture='L2', loss_type='nll'):
-        criterion = HuberLoss(delta=0.5) if loss_type == 'huber' else nn.BCEWithLogitsLoss()
-        architecture_map = {name: model for name, model in self.qnn_zoo}
+        """
+        Huấn luyện CloudLeak
+        """
+        
+        # === GIAI ĐOẠN 1: TIỀN HUẤN LUYỆN ===
+        print("--- CloudLeak: Giai đoạn 1: Tiền huấn luyện ---")
         model = self.load_pretrained_model(architecture)
         if model is None:
-            public_inputs, public_targets = [], []
-            for inputs, targets in out_of_domain_loader:
-                public_inputs.append(inputs.cpu().numpy())
-                public_targets.append(targets.cpu().numpy())
-            public_inputs = np.concatenate(public_inputs)[:3000]
-            public_targets = np.concatenate(public_targets)[:3000]
-            public_dataset = TensorDataset(
-                torch.tensor(public_inputs, dtype=torch.float32),
-                torch.tensor(public_targets, dtype=torch.float32).view(-1, 1)
-            )
-            public_loader = DataLoader(public_dataset, batch_size=batch_size, shuffle=True)
-            model, pretrain_history = self.pretrain(public_loader, n_epochs=10, batch_size=batch_size, architecture=architecture)
+            # Dùng out_of_domain_loader làm public_loader cho pre-training
+            print("Chưa có mô hình pre-trained, bắt đầu pre-training...")
+            self.pretrain(out_of_domain_loader, n_epochs=10, batch_size=batch_size, architecture=architecture)
+            model = self.load_pretrained_model(architecture)
+            if model is None: 
+                raise RuntimeError("Pre-training thất bại, không thể tiếp tục.")
+
+        # === GIAI ĐOẠN 2: XÂY DỰNG TẬP DỮ LIỆU TRUY VẤN ĐỐI KHÁNG ===
+        print("\n--- CloudLeak: Giai đoạn 2: Xây dựng tập dữ liệu truy vấn đối kháng ---")
+        
+        adversarial_set_path = os.path.join(self.save_path, f'cloudleak_adversarial_set_{architecture}.npy')
+        
+        if os.path.exists(adversarial_set_path):
+            print(f"Đang tải tập đối kháng đã tạo từ: {adversarial_set_path}")
+            adversarial_query_set_np = np.load(adversarial_set_path)
         else:
-            pretrain_history = {'pretrain_loss': [], 'pretrain_accuracy': []}
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-        history = {'train_loss': [], 'train_accuracy': []}
-        out_inputs, out_targets = [], []
-        for inputs, targets in out_of_domain_loader:
-            out_inputs.append(inputs.cpu().numpy())
-            out_targets.append(targets.cpu().numpy())
-            if len(np.concatenate(out_inputs)) >= 500:
-                break
-        out_inputs = np.concatenate(out_inputs)[:500]
-        out_targets = np.concatenate(out_targets)[:500]
-        query_inputs = np.concatenate([item[0] for item in query_dataset])
-        query_outputs = np.concatenate([item[1][:, 1:2] for item in query_dataset])
-        query_inputs_tensor = torch.tensor(query_inputs, dtype=torch.float32, device=self.device)
-        query_targets_tensor = torch.tensor(query_outputs, dtype=torch.float32, device=self.device)
-        adv_inputs = self.generate_adversarial_samples(self.victim_model, query_inputs_tensor, query_targets_tensor)
-        adv_inputs = adv_inputs.cpu().numpy()
-        adv_outputs = query_outputs
-        synthetic_inputs = np.concatenate([out_inputs, query_inputs, adv_inputs])
-        synthetic_outputs = np.concatenate([out_targets[:, None], query_outputs, adv_outputs])
-        synthetic_dataset = TensorDataset(
-            torch.tensor(synthetic_inputs, dtype=torch.float32),
-            torch.tensor(synthetic_outputs, dtype=torch.float32).view(-1, 1)
+            print("Chưa có tập đối kháng, bắt đầu tạo...")
+            # 2.1. Chuẩn bị nguồn tài nguyên (resource pool)
+            in_domain_pool = np.concatenate([item[0] for item in query_dataset])
+            out_domain_pool_list = [item[0].cpu().numpy() for i, item in enumerate(out_of_domain_loader) if i * batch_size < 512]
+            out_domain_pool = np.concatenate(out_domain_pool_list)[:512]
+            resource_pool = np.concatenate([in_domain_pool, out_domain_pool])
+            print(f"Tổng nguồn tài nguyên: {resource_pool.shape[0]} ảnh.")
+
+            # 2.2. Tạo mẫu đối kháng từ toàn bộ resource pool
+            adversarial_query_set_np = self.generate_adversarial_samples(model, resource_pool)
+            
+            # Lưu lại để dùng cho các lần chạy sau
+            np.save(adversarial_set_path, adversarial_query_set_np)
+            print(f"Đã lưu tập đối kháng tại: {adversarial_set_path}")
+        
+        adversarial_query_set_tensor = torch.tensor(adversarial_query_set_np, dtype=torch.float32).to(self.device)
+        print(f"Kích thước tập truy vấn đối kháng: {adversarial_query_set_np.shape[0]} mẫu.")
+        
+        # === GIAI ĐOẠN 3: TRUY VẤN & HUẤN LUYỆN CUỐI CÙNG ===
+        print("\n--- CloudLeak: Giai đoạn 3: Truy vấn nạn nhân và Huấn luyện ---")
+
+        # 3.1. Truy vấn nạn nhân để lấy nhãn cho tập đối kháng
+        # Để tránh quá tải bộ nhớ, truy vấn theo từng batch
+        labeled_adversarial_dataset = []
+        adv_loader = DataLoader(TensorDataset(adversarial_query_set_tensor), batch_size=batch_size)
+        
+        for adv_batch_tensor, in tqdm(adv_loader, desc="Truy vấn nạn nhân với các mẫu đối kháng"):
+            outputs_prob = self.qnnaas_predict(self.victim_model, adv_batch_tensor, self.device)
+            # Lưu lại cặp (ảnh đối kháng, nhãn từ victim)
+            labeled_adversarial_dataset.append(
+                (adv_batch_tensor.cpu().numpy(), outputs_prob.cpu().numpy())
+            )
+
+        # Gộp kết quả
+        final_inputs = np.concatenate([item[0] for item in labeled_adversarial_dataset])
+        # Lấy xác suất của lớp 1 làm mục tiêu
+        final_outputs = np.concatenate([item[1][:, 1:2] for item in labeled_adversarial_dataset])
+        
+        # 3.2. Fine-tune mô hình trên dữ liệu đã thu thập
+        final_dataset = TensorDataset(
+            torch.tensor(final_inputs, dtype=torch.float32),
+            torch.tensor(final_outputs, dtype=torch.float32).view(-1, 1)
         )
-        synthetic_loader = DataLoader(synthetic_dataset, batch_size=batch_size, shuffle=True)
-        for epoch in tqdm(range(n_epochs), desc="Training CloudLeak"):
+        final_loader = DataLoader(final_dataset, batch_size=batch_size, shuffle=True)
+
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        criterion = HuberLoss(delta=0.5) if loss_type == 'huber' else nn.BCEWithLogitsLoss()
+        history = {'train_loss': []}
+
+        print(f"Bắt đầu Fine-tuning cuối cùng cho CloudLeak ({architecture})...")
+        for epoch in tqdm(range(n_epochs), desc=f"Fine-tuning CloudLeak"):
             model.train()
             running_loss = 0.0
-            correct = 0
-            total = 0
-            for inputs, targets in synthetic_loader:
+            for inputs, targets in final_loader:
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
-                targets = targets.view(-1, 1).float()
                 optimizer.zero_grad()
-                outputs = model(inputs)
+                outputs = model(inputs) # model trả về logits
                 loss = criterion(outputs, targets)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
-                predicted = (torch.sigmoid(outputs) >= 0.5).float().squeeze()
-                total += targets.size(0)
-                correct += (predicted == targets.squeeze()).sum().item()
-            avg_loss = running_loss / len(synthetic_loader)
-            accuracy = 100 * correct / total
-            history['train_loss'].append(avg_loss)
-            history['train_accuracy'].append(accuracy)
-            print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
-        return model, {**pretrain_history, **history}
-
+            history['train_loss'].append(running_loss / len(final_loader))
+        
+        print("Hoàn thành huấn luyện CloudLeak.")
+        return model, history
     def evaluate(self, model, test_loader):
         metrics = evaluate_model_with_metrics(model, test_loader, self.device)
         return metrics

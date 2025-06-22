@@ -18,9 +18,17 @@ This project implements a Quantum Neural Network (QNN) for binary classification
 ## Setup
 
 1. Install dependencies:
+
     ```bash
     pip install -r requirements.txt
+
+    or
+
+    pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+    pip install pennylane pennylane-lightning[gpu]
+
     ```
+
 2. Ensure CUDA is available for GPU acceleration (optional).
 
 ## Usage
