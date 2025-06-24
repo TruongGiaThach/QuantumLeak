@@ -1,6 +1,7 @@
  
 import pennylane as qml
 import torch
+import numpy as np
 from configs.config import N_QUBITS, N_LAYERS, QUANTUM_DEVICE
 
 def create_transfer_learning_circuit(n_qubits=N_QUBITS, n_layers=N_LAYERS, device_name=QUANTUM_DEVICE):
