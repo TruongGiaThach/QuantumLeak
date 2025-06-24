@@ -5,7 +5,7 @@ from configs.config import *
 from data.data_pipeline import CIFAR10DataPipeline, get_cq_dataloaders, create_out_of_domain_loader
 from models.quanv_model import QuanvModel
 from models.basic_qnn import BasicQNN
-from models.circuit14 import QuantumLayer
+from models.circuit14 import QuantumLayer, PureQuantumCircuit14
 from models.transfer_learning import CQTransferLearningModel
 from quantum_circuits.quanv_circuit import create_quanv_circuit
 from quantum_circuits.basic_qnn_circuit import create_quantum_circuit
@@ -15,8 +15,17 @@ from utils.training import train_model, evaluate_model_with_metrics
 from utils.visualization import plot_training_history, plot_quanv_visualization, plot_model_comparison
 from attacks.quantum_leak import CloudLeak, QuantumLeak, HuberLoss
 from torch.utils.data import TensorDataset, DataLoader
-
+def print_best_metrics(model_name, best_metrics):
+    """Hàm tiện ích để in các chỉ số của mô hình tốt nhất."""
+    print(f"\n--- {model_name} Victim Model (Best on Val Set) ---")
+    print(f"Accuracy: {best_metrics.get('accuracy', 0):.2f}%")
+    print(f"Precision: {best_metrics.get('precision', 0):.2f}")
+    print(f"Recall: {best_metrics.get('recall', 0):.2f}")
+    print(f"F1-Score: {best_metrics.get('f1', 0):.2f}")
+    print("--------------------------------------------------")
 def run_quanv_experiment():
+    print("\n--- Running Quanv Experiment ---")
+    save_dir = os.path.join(SAVE_PATH, "quanv")
     pipeline = CIFAR10DataPipeline(n_train=N_TRAIN, n_test=N_TEST, save_path=SAVE_PATH)
     train_loader, test_loader = get_cq_dataloaders(pipeline, batch_size=BATCH_SIZE, device=torch.device(DEVICE))
     train_images = []
@@ -47,71 +56,76 @@ def run_quanv_experiment():
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
     model = QuanvModel().to(DEVICE)
     criterion = torch.nn.BCELoss()
-    train_losses, val_accuracies = train_model(model, train_loader, test_loader, torch.device(DEVICE), criterion, N_EPOCHS, LEARNING_RATE, SAVE_PATH + "/quanv")
-    plot_training_history({'train_loss': train_losses, 'test_accuracy': val_accuracies}, SAVE_PATH + "/quanv", "Quanv Training History")
-    plot_quanv_visualization(train_images, q_train_images, SAVE_PATH + "/quanv")
+    history, best_metrics = train_model(model, train_loader, test_loader, torch.device(DEVICE), criterion, N_EPOCHS, LEARNING_RATE, save_dir)
+    print_best_metrics("QuanvNN", best_metrics)
+    plot_training_history(history, save_dir, "Quanv Training History")
+    plot_quanv_visualization(train_images, q_train_images.cpu(), save_dir)
 
 def run_basic_qnn_experiment():
-    pipeline = CIFAR10DataPipeline(n_train=N_TRAIN, n_test=N_TEST, save_path=SAVE_PATH)
-    train_loader, test_loader = get_cq_dataloaders(pipeline, batch_size=BATCH_SIZE, device=torch.device(DEVICE))
-    quantum_circuit = create_quantum_circuit()
-    model = BasicQNN(N_QUBITS, quantum_circuit).to(DEVICE)
-    criterion = torch.nn.BCELoss()
-    history = train_model(model, train_loader, test_loader, torch.device(DEVICE), criterion, N_EPOCHS, LEARNING_RATE, SAVE_PATH + "/basic_qnn")
-    plot_training_history(history, SAVE_PATH + "/basic_qnn"	, "Basic QNN Training History")
+    print("\n--- Running Basic QNN Experiment ---")
+    save_dir = os.path.join(SAVE_PATH, "basic_qnn")
+    pipeline = CIFAR10DataPipeline(n_train=N_TRAIN, n_test=N_TEST, save_patSAVE_PATHir)
+    train_loader, test_loader = get_cq_dataloaders(pipeline, batch_size=BATCH_SIZE, device=torch.device(DEVICE))
+    quantum_circuit = create_quantum_circuit()
+    model = BasicQNN(N_QUBITS, quantum_circuit).to(DEVICE)
+    criterion = torch.nn.BCELở cuối
+
+    history, best_metrics = train_model(model, train_loader, test_loader, torch.device(DEVICE), criterion, N_EPOCHS, LEARNING_RATE, save_dir)
+    
+    print_best_metrics("BasicQNN", best_metrics)
+    plot_training_history(history, save_dir, "Basic QNN Training History")
 
-def run_circuit14_experiment():
+def run_circuit14_experimprint("\n--- Running Hybrid Circuit 14 Experiment ---")
+    save_dir = os.path.join(SAVE_PATH, "circuit14")
     pipeline = CIFAR10DataPipeline(n_train=N_TRAIN, n_test=N_TEST, save_path=SAVE_PATH)
     train_loader, test_loader = get_cq_dataloaders(pipeline, batch_size=BATCH_SIZE, device=torch.device(DEVICE))
-    model = QuantumLayer(N_QUBITS, N_LAYERS, QUANTUM_DEVICE).to(DEVICE)
-    criterion = torch.nn.BCELoss()
-    train_losses, val_accuracies = train_model(model, train_loader, test_loader, torch.device(DEVICE), criterion, N_EPOCHS, LEARNING_RATE, SAVE_PATH + "/circuit14")
-    plot_training_history({'train_loss': train_losses, 'test_accuracy': val_accuracies}, SAVE_PATH + "/circuit14", "Circuit14 Training History")
-def run_pure_qnn_circuit14_experiment():
-    print("\n--- Bắt đầu thử nghiệm Pure QNN Circuit 14 ---")
-    N_QUBITS_PURE = 6  # Cần 2^6 = 64 chiều cho ảnh 8x8
-    N_LAYERS_PURE = 4  # Tăng độ sâu lượng tử để bù cho việc thiếu lớp cổ điển
-    pipeline = CIFAR10DataPipeline(n_train=N_TRAIN, n_test=N_TEST, save_path=SAVE_PATH)
-    train_loader, test_loader = get_cq_dataloaders(pipeline, batch_size=BATCH_SIZE, device=torch.device(DEVICE))
-
-    quantum_circuit, crx_per_layer = create_circuit14(
-        n_qubits=N_QUBITS_PURE, 
-        n_layers=N_LAYERS_PURE, 
-        device_name=QUANTUM_DEVICE
-    )
     
+    model = QuantumLayer(N_QUBITS, N_LAYERS, device_name=QUANTUM_DEVICE).to(DEVICE)
+    criterion = torch.nn.BCELoss()
+
+    history, best_metrics = train_model(model, train_loader, test_loader, torch.device(DEVICE), criterion, N_EPOCHS, LEARNING_RATE, save_dir)
+    
+    print_best_metrics("QuantumLayer (Circuit14)", best_metrics)
+    plot_training_history(history, save_dir, "Circuit14 Training History")g History")
+def run_pure_qnn_circuit14_experimprint("\n--- Running Pure QNN Circuit 14 Experiment ---")
+    save_dir = os.path.join(SAVE_PATH, "pure_qnn_circuit14")
+    
+    N_QUBITS_PURE = 6 # Cần 2^6 = 64 chiều cho ảnh 8x8
+    N_LAYERS_PURE = 4
+    
+    pipeline = CIFAR10DataPipeline(n_train=N_TRAIN, n_test=N_TEST, save_path=SAVE_PATH)
+    train_loader, test_loader = get_cq_dataloaders(pipeline, batch_size=BATCH_SIZE, device=torch.device(DEVICE))
+
     model = PureQuantumCircuit14(
         n_qubits=N_QUBITS_PURE, 
         n_layers=N_LAYERS_PURE, 
-        quantum_circuit=quantum_circuit, 
         device_name=QUANTUM_DEVICE
     ).to(DEVICE)
     
-    criterion = torch.nn.BCELoss()
-    history = train_model(
-        model, 
-        train_loader, 
-        test_loader, 
-        torch.device(DEVICE), 
-        criterion, 
-        N_EPOCHS, 
-        LEARNING_RATE,
-        SAVE_PATH + "/pure_qnn_circuit14"
+    # Dùng BCEWithLogitsLoss vì PureQuantumCircuit14 trả về logits
+    criterion = torch.nn.BCEWithLogitsLoss()
+    
+    history, best_metrics = train_model(
+        model, train_loader, test_loader, 
+        torch.device(DEVICE), criterion, N_EPOCHS, 
+        LEARNING_RATE, save_dir
     )
-    os.makedirs(SAVE_PATH + "/pure_qnn_circuit14", exist_ok=True)
-    plot_training_history(
-        {'train_loss': history[0], 'test_accuracy': history[1]}, 
-        SAVE_PATH + "/pure_qnn_circuit14", 
-        "Pure QNN Circuit 14 Training History"
+    
+    print_best_metrics("Pure QNN Circuit 14", best_metrics)
+    plot_training_history(history, save_dir, "Pure QNN Circuit 14 Training History")tory"
     )
 
-def run_transfer_learning_experiment():
-    pipeline = CIFAR10DataPipeline(n_train=N_LEAK_TRAIN, n_test=N_LEAK_TEST, save_path=SAVE_PATH)
+def run_transfer_learning_experimprint("\n--- Running Transfer Learning Experiment ---")
+    save_dir = os.path.join(SAVE_PATH, "transfer_learning")
+    pipeline = CIFAR10DataPipeline(n_train=N_TRAIN, n_test=N_TEST, save_path=SAVE_PATH)
     train_loader, test_loader = get_cq_dataloaders(pipeline, batch_size=BATCH_SIZE, device=torch.device(DEVICE))
     model = CQTransferLearningModel(N_QUBITS, N_LAYERS).to(DEVICE)
-    criterion = torch.nn.BCELoss()
-    train_losses, val_accuracies = train_model(model, train_loader, test_loader, torch.device(DEVICE), criterion, N_EPOCHS, LEARNING_RATE, SAVE_PATH + "/transfer_learning")
-    plot_training_history({'train_loss': train_losses, 'test_accuracy': val_accuracies}, SAVE_PATH + "/transfer_learning", "Transfer Learning Training History")
+    criterion = torch.nn.BCELoss() 
+
+    history, best_metrics = train_model(model, train_loader, test_loader, torch.device(DEVICE), criterion, N_EPOCHS, LEARNING_RATE, save_dir)
+    
+    print_best_metrics("CQ Transfer Learning", best_metrics)
+    plot_training_history(history, save_dir, "Transfer Learning Training History")g History")
 
 def run_leak_experiment(model_type="basic_qnn"):
     pipeline = CIFAR10DataPipeline(n_train=N_LEAK_TRAIN, n_test=N_LEAK_TEST, save_path=SAVE_PATH)
@@ -244,7 +258,7 @@ if __name__ == "__main__":
     run_pure_qnn_circuit14_experiment()
     run_basic_qnn_experiment()
     run_transfer_learning_experiment()
+    run_quanv_experiment()
     run_leak_experiment("basic_qnn")
     run_leak_experiment("circuit14")
     run_leak_experiment("transfer_learning")
-    # run_quanv_experiment()

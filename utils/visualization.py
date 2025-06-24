@@ -5,21 +5,32 @@ import torch
 import numpy as np
 
 def plot_training_history(history, save_path, title="Training History"):
-    plt.figure(figsize=(12, 4))
+    # Số lượng subplot sẽ phụ thuộc vào số lượng key trong history
+    num_plots = len(history.keys())
+    plt.figure(figsize=(6 * num_plots, 5))
+
+    plot_index = 1
     if 'train_loss' in history:
-        plt.subplot(1, 2, 1)
+        plt.subplot(1, num_plots, plot_index)
         plt.plot(history['train_loss'], label='Training Loss')
         plt.title('Model Loss')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
+        plt.grid(True)
         plt.legend()
-    if 'test_accuracy' in history:
-        plt.subplot(1, 2, 2)
-        plt.plot(history['test_accuracy'], label='Test Accuracy')
-        plt.title('Model Accuracy')
-        plt.xlabel('Epoch')
-        plt.ylabel('Accuracy (%)')
-        plt.legend()
+        plot_index += 1
+
+    for key, value in history.items():
+        if 'val_' in key:
+            plt.subplot(1, num_plots, plot_index)
+            plt.plot(value, label=f'Validation {key.split("_")[1].capitalize()}', color='orange')
+            plt.title(f'Validation {key.split("_")[1].capitalize()}')
+            plt.xlabel('Epoch')
+            plt.ylabel(key.split("_")[1].capitalize())
+            plt.grid(True)
+            plt.legend()
+            plot_index += 1
+
     plt.tight_layout()
     plt.savefig(os.path.join(save_path, f'{title.lower().replace(" ", "_")}.png'))
     plt.close()

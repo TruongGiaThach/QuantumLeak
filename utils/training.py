@@ -1,39 +1,82 @@
 import torch
 import numpy as np
 from sklearn.metrics import precision_score, recall_score, f1_score
-from models.qnn_leak import QNN # Import để kiểm tra type
+from models.qnn_leak import QNN
+import os
+import json # Thêm import để làm việc với file JSON
 
 def train_model(model, train_loader, val_loader, device, criterion, n_epochs, learning_rate, save_path):
+    # Đảm bảo thư mục lưu trữ tồn tại
+    os.makedirs(save_path, exist_ok=True)
+    
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    train_losses = []
-    val_accuracies = []
+    
+    history = {
+        'train_loss': [],
+        'val_accuracy': [],
+        'val_precision': [],
+        'val_recall': [],
+        'val_f1': []
+    }
+    
     best_val_accuracy = 0.0
-    best_model_path = f"{save_path}/best_model.pth"
+    best_metrics = {}
+    best_model_path = os.path.join(save_path, "best_model.pth")
+    best_metrics_path = os.path.join(save_path, "best_metrics.json")
+
     for epoch in range(n_epochs):
         model.train()
         running_loss = 0.0
         for inputs, labels in train_loader:
             inputs, labels = inputs.to(device), labels.to(device)
+            # Logic huấn luyện không đổi
             optimizer.zero_grad()
             outputs = model(inputs)
+            # Đối với victim models trả về xác suất, criterion là BCELoss
+            # Đối với substitute models trả về logits, criterion là BCEWithLogitsLoss
+            # Logic này đã tương thích
             loss = criterion(outputs, labels.view(-1, 1).float())
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
+            
         avg_train_loss = running_loss / len(train_loader)
-        train_losses.append(avg_train_loss)
+        history['train_loss'].append(avg_train_loss)
+        
+        # Đánh giá trên tập validation
         val_metrics = evaluate_model_with_metrics(model, val_loader, device, criterion)
-        val_accuracies.append(val_metrics['accuracy'])
+        history['val_accuracy'].append(val_metrics['accuracy'])
+        history['val_precision'].append(val_metrics['precision'])
+        history['val_recall'].append(val_metrics['recall'])
+        history['val_f1'].append(val_metrics['f1'])
+        
         print(f"Epoch {epoch+1}/{n_epochs}, Train Loss: {avg_train_loss:.4f}, "
               f"Val Accuracy: {val_metrics['accuracy']:.2f}%, "
               f"Precision: {val_metrics['precision']:.2f}, "
               f"Recall: {val_metrics['recall']:.2f}, "
               f"F1: {val_metrics['f1']:.2f}")
+
+        # --- NÂNG CẤP LOGIC LƯU TRỮ ---
         if val_metrics['accuracy'] > best_val_accuracy:
+            print(f"  -> New best model found! Saving to {save_path}")
             best_val_accuracy = val_metrics['accuracy']
+            best_metrics = val_metrics
+            
+            # Lưu trọng số của mô hình tốt nhất
             torch.save(model.state_dict(), best_model_path)
-    return train_losses, val_accuracies
+            
+            # Lưu các chỉ số của mô hình tốt nhất vào file JSON
+            with open(best_metrics_path, 'w') as f:
+                json.dump(best_metrics, f, indent=4)
+                
+    print(f"\nTraining finished. Best validation accuracy: {best_val_accuracy:.2f}%")
+    print(f"Best metrics saved to {best_metrics_path}")
+    
+    # Trả về lịch sử và các chỉ số tốt nhất
+    return history, best_metrics
+
+
 
 def evaluate_model_with_metrics(models, data_loader, device, criterion=None, is_ensemble=False):
     if not isinstance(models, (list, tuple)):

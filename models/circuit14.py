@@ -26,7 +26,16 @@ class QuantumLayer(nn.Module):
         x = x.view(-1, 16 * 15 * 15)
         x = torch.tanh(self.pre_net(x)) 
 
-        x = torch.nn.functional.normalize(x, p=2, dim=1, eps=1e-8)
+        # --- TEMP FIX NORM ERROR ---
+        # Đảm bảo không có vector nào có norm chính xác bằng 0
+        norms = torch.norm(x, p=2, dim=1, keepdim=True)
+        zero_mask = (norms < 1e-8)
+        noise = torch.randn_like(x) * 1e-8
+        x = torch.where(zero_mask, noise, x)
+        
+        # Sau đó mới chuẩn hóa
+        x = torch.nn.functional.normalize(x, p=2, dim=1)
+        # ---------------------------
 
         batch_size = x.size(0)
         outputs = []

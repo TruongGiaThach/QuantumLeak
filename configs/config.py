@@ -8,7 +8,7 @@ QUANTUM_LEAK_SAVE_PATH = "./results"
 DATA_PATH = "./data"
 
 # Hyperparameters
-N_EPOCHS = 30
+N_EPOCHS = 1
 N_LAYERS = 2
 N_TRAIN = 1000
 N_TEST = 200
