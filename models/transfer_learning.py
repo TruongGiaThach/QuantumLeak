@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import pennylane as qml
 from torchvision.models import resnet18, ResNet18_Weights
-
+import numpy as np
 class DressedQuantumCircuit(nn.Module):
     def __init__(self, n_qubits, n_layers, device_name="default.qubit"):
         super(DressedQuantumCircuit, self).__init__()

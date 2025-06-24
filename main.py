@@ -105,8 +105,7 @@ def run_pure_qnn_circuit14_experiment():
         device_name=QUANTUM_DEVICE
     ).to(DEVICE)
     
-    # Dùng BCEWithLogitsLoss vì PureQuantumCircuit14 trả về logits
-    criterion = torch.nn.BCEWithLogitsLoss()
+    criterion = torch.nn.BCELoss()
     
     history, best_metrics = train_model(
         model, train_loader, test_loader, 
@@ -144,6 +143,13 @@ def run_leak_experiment(model_type="basic_qnn"):
     elif model_type == "transfer_learning":
         victim_model = CQTransferLearningModel(N_LEAK_QUBITS, N_LEAK_LAYERS).to(DEVICE)
         victim_model.load_state_dict(torch.load(os.path.join(SAVE_PATH + "/transfer_learning", "best_model.pth")))
+    elif model_type == "pure_circuit14":
+        print("Loading PureQuantumCircuit14 as the victim model...")
+        # Cần các hằng số đúng cho mô hình này
+        N_QUBITS_PURE = 6 
+        N_LAYERS_PURE = 4
+        victim_model = PureQuantumCircuit14(N_QUBITS_PURE, N_LAYERS_PURE, device_name=QUANTUM_DEVICE).to(DEVICE)
+        victim_model.load_state_dict(torch.load(os.path.join(SAVE_PATH, "pure_qnn_circuit14", "best_model.pth")))
     else:
         raise ValueError("Invalid model type")
     victim_model.eval()
@@ -257,11 +263,12 @@ def run_leak_experiment(model_type="basic_qnn"):
     )
 
 if __name__ == "__main__":
-    run_circuit14_experiment()
-    run_pure_qnn_circuit14_experiment()
-    run_basic_qnn_experiment()
-    run_transfer_learning_experiment()
-    run_quanv_experiment()
+    # run_circuit14_experiment()
+    # run_pure_qnn_circuit14_experiment()
+    # run_basic_qnn_experiment()
+    # run_transfer_learning_experiment()
+    # run_quanv_experiment()
     run_leak_experiment("basic_qnn")
     run_leak_experiment("circuit14")
     run_leak_experiment("transfer_learning")
+    run_leak_experiment("pure_circuit14")

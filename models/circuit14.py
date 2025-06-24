@@ -1,5 +1,5 @@
 
- 
+from torchvision import transforms
 import torch
 import torch.nn as nn
 import pennylane as qml
@@ -88,5 +88,5 @@ class PureQuantumCircuit14(nn.Module):
         outputs = torch.stack(outputs)
 
         # 4. Lớp tuyến tính cuối cùng để ra logits
-        logits = self.fc(outputs)
-        return logits
+        probs  = self.fc(outputs).sigmoid()
+        return probs 
