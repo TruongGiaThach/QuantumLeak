@@ -178,7 +178,8 @@ class ModelExtraction(ABC):
                 adv_inputs_tensor[boundary_mask] = perturbed_inputs
             
         return adv_inputs_tensor.cpu().numpy()
-
+        
+    
     @abstractmethod
     def train(self, *args, **kwargs):
         pass
@@ -197,6 +198,7 @@ class CloudLeak(ModelExtraction):
         )
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         history = {'pretrain_loss': [], 'pretrain_accuracy': []}
+        pbar = tqdm(range(n_epochs), desc=f"Pre-training CloudLeak ({architecture})")
         for epoch in tqdm(range(n_epochs), desc="Pretraining CloudLeak"):
             model.train()
             running_loss = 0.0
@@ -218,7 +220,7 @@ class CloudLeak(ModelExtraction):
             accuracy = 100 * correct / total
             history['pretrain_loss'].append(avg_loss)
             history['pretrain_accuracy'].append(accuracy)
-            print(f"Pretrain Epoch {epoch+1}, Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
+            pbar.set_postfix(loss=f"{avg_loss:.4f}", acc=f"{accuracy:.2f}%")
         if save:
             save_path = os.path.join(self.save_path, f'pretrained_cloudleak_{architecture}.pth')
             torch.save(model.state_dict(), save_path)
@@ -313,7 +315,8 @@ class CloudLeak(ModelExtraction):
         criterion = HuberLoss(delta=0.5) if loss_type == 'huber' else nn.BCEWithLogitsLoss()
         history = {'train_loss': []}
 
-        print(f"Bắt đầu Fine-tuning cuối cùng cho CloudLeak ({architecture})...")
+        print(f"---Bắt đầu Fine-tuning cuối cùng cho CloudLeak ({architecture})...")
+        pbar = tqdm(range(n_epochs), desc=f"Fine-tuning CloudLeak")
         for epoch in tqdm(range(n_epochs), desc=f"Fine-tuning CloudLeak"):
             model.train()
             running_loss = 0.0
@@ -326,6 +329,8 @@ class CloudLeak(ModelExtraction):
                 optimizer.step()
                 running_loss += loss.item()
             history['train_loss'].append(running_loss / len(final_loader))
+            avg_loss = running_loss / len(final_loader)
+            pbar.set_postfix(loss=f"{avg_loss:.4f}")
         
         print("Hoàn thành huấn luyện CloudLeak.")
         return model, history
@@ -355,6 +360,8 @@ class QuantumLeak(ModelExtraction):
         base_model = architecture_map[architecture]
         base_circuit = base_model.quantum_circuit
         vqc_layers = base_model.n_layers
+        total_steps = n_committee * n_epochs
+        pbar = tqdm(total=total_steps, desc="Training QuantumLeak Ensemble")
         for i in range(n_committee):
             model = QNN(self.n_qubits, base_circuit, vqc_layers).to(self.device)
             param_size = 12 * 2 if architecture == 'A1' else (4 * 2 if architecture == 'A2' else vqc_layers * self.n_qubits)
@@ -393,8 +400,10 @@ class QuantumLeak(ModelExtraction):
                 accuracy = 100 * correct / total
                 history['train_loss'].append(avg_loss)
                 history['train_accuracy'].append(accuracy)
-                print(f"Committee {i+1}, Epoch {epoch+1}, Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
+                pbar.update(1)
+                pbar.set_postfix(committee=f"{i+1}/{n_committee}", epoch=f"{epoch+1}/{n_epochs}", loss=f"{avg_loss:.4f}", accuracy=f"{accuracy:.2f}%")
             ensemble_models.append(model)
+            pbar.close()
         self.ensemble_models = ensemble_models
         return ensemble_models, history
 
