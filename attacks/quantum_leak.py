@@ -35,7 +35,7 @@ class ModelExtraction(ABC):
         self.circuit_device = circuit_device
         self.qnn_zoo = self._create_qnn_zoo()
 
-    def _create_quantum_circuit(self, n_layers):
+    def _create_L_circuit(self, n_layers):
         dev = qml.device(self.circuit_device, wires=self.n_qubits)
         @qml.qnode(dev, interface="torch", diff_method="parameter-shift")
         def circuit(inputs, weights):
@@ -87,31 +87,44 @@ class ModelExtraction(ABC):
             return [qml.expval(qml.PauliZ(i)) for i in range(self.n_qubits)]
         return circuit
 
-    def _create_qnn_zoo(self):
-        qnn_zoo = []
-        for n_layers in [1, 2, 3]:
-            circuit = self._create_quantum_circuit(n_layers)
+    
+    def get_substitute_qnn(self, architecture: str):
+        """
+        Tạo và trả về một INSTANCE QNN MỚI dựa trên tên kiến trúc.
+        """
+        if architecture.startswith('L'):
+            try:
+                n_layers = int(architecture[1:])
+            except ValueError:
+                raise ValueError(f"Kiến trúc không hợp lệ: {architecture}")
+            
             model = QNN(self.n_qubits, circuit, n_layers).to(self.device)
             model.q_params = nn.Parameter(
                 torch.tensor(np.random.normal(0, np.pi, (n_layers * self.n_qubits,)),
                              dtype=torch.float32, device=self.device, requires_grad=True)
             )
-            qnn_zoo.append((f'L{n_layers}', model))
-        circuit_a1 = self._create_a1_circuit()
-        model_a1 = QNN(self.n_qubits, circuit_a1, n_layers=6).to(self.device)
-        model_a1.q_params = nn.Parameter(
-            torch.tensor(np.random.normal(0, np.pi, (12 * 2,)),
-                         dtype=torch.float32, device=self.device, requires_grad=True)
-        )
-        qnn_zoo.append(('A1', model_a1))
-        circuit_a2 = self._create_a2_circuit()
-        model_a2 = QNN(self.n_qubits, circuit_a2, n_layers=4).to(self.device)
-        model_a2.q_params = nn.Parameter(
-            torch.tensor(np.random.normal(0, np.pi, (4 * 2,)),
-                         dtype=torch.float32, device=self.device, requires_grad=True)
-        )
-        qnn_zoo.append(('A2', model_a2))
-        return qnn_zoo
+            return model
+
+        elif architecture == 'A1':
+            circuit_a1 = self._create_a1_circuit()
+            model_a1 = QNN(self.n_qubits, circuit_a1, n_layers=6).to(self.device)
+            model_a1.q_params = nn.Parameter(
+				torch.tensor(np.random.normal(0, np.pi, (12 * 2,)),
+							dtype=torch.float32, device=self.device, requires_grad=True)
+			)
+            return model
+            
+        elif architecture == 'A2':
+            circuit_a2 = self._create_a2_circuit()
+            model_a2 = QNN(self.n_qubits, circuit_a2, n_layers=4).to(self.device)
+            model_a2.q_params = nn.Parameter(
+            	torch.tensor(np.random.normal(0, np.pi, (4 * 2,)),
+                	dtype=torch.float32, device=self.device, requires_grad=True)
+)
+            return model
+            
+        else:
+            raise ValueError(f"Kiến trúc không xác định: {architecture}")
 
     def qnnaas_predict(self, model, images, device):
         model.eval()
@@ -191,11 +204,8 @@ class ModelExtraction(ABC):
 class CloudLeak(ModelExtraction):
     def pretrain(self, public_loader, n_epochs=10, batch_size=8, architecture='L2', save=True):
         criterion = nn.BCEWithLogitsLoss()
-        architecture_map = {name: model for name, model in self.qnn_zoo}
-        model = architecture_map[architecture]
-        model.q_params = nn.Parameter(
-            torch.normal(mean=0, std=np.pi, size=(model.n_layers * self.n_qubits,), device=self.device)
-        )
+        model = self.get_substitute_qnn(architecture)
+        
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         history = {'pretrain_loss': [], 'pretrain_accuracy': []}
         pbar = tqdm(range(n_epochs), desc=f"Pre-training CloudLeak ({architecture})")
@@ -228,10 +238,8 @@ class CloudLeak(ModelExtraction):
         return model, history
 
     def load_pretrained_model(self, architecture='L2'):
-        architecture_map = {name: model for name, model in self.qnn_zoo}
-        if architecture not in architecture_map:
-            raise ValueError(f"Architecture {architecture} not found in QNN zoo.")
-        model = architecture_map[architecture]
+        
+        model = self.get_substitute_qnn(architecture)
         pretrained_path = os.path.join(self.save_path, f'pretrained_cloudleak_{architecture}.pth')
         if os.path.exists(pretrained_path):
             model.load_state_dict(torch.load(pretrained_path, map_location=self.device))
@@ -347,28 +355,22 @@ class QuantumLeak(ModelExtraction):
     def train(self, query_dataset, out_of_domain_loader, n_epochs=30, batch_size=8, architecture='L2', loss_type='huber'):
         return self.train_ensemble(query_dataset, n_epochs, batch_size, architecture, loss_type, self.n_committee)
 
-    def train_ensemble(self, query_dataset, n_epochs=30, batch_size=8, architecture='L2', loss_type='huber', n_committee=None):
+    def train_ensemble(self, query_dataset, n_epochs=30, batch_size=8, architecture='L2', loss_type='huber', n_committee=None , learn_rate=0.001):
         n_committee = n_committee or self.n_committee
         criterion = HuberLoss(delta=0.5) if loss_type == 'huber' else nn.BCEWithLogitsLoss()
         dataset_size = len(query_dataset)
         subset_size = dataset_size // n_committee
         ensemble_models = []
         history = {'train_loss': [], 'train_accuracy': []}
-        architecture_map = {name: model for name, model in self.qnn_zoo}
-        if architecture not in architecture_map:
-            raise ValueError(f"Architecture {architecture} not found in QNN zoo.")
-        base_model = architecture_map[architecture]
+        
+        base_model = self.get_substitute_qnn(architecture)
         base_circuit = base_model.quantum_circuit
         vqc_layers = base_model.n_layers
         total_steps = n_committee * n_epochs
         pbar = tqdm(total=total_steps, desc="Training QuantumLeak Ensemble")
         for i in range(n_committee):
-            model = QNN(self.n_qubits, base_circuit, vqc_layers).to(self.device)
-            param_size = 12 * 2 if architecture == 'A1' else (4 * 2 if architecture == 'A2' else vqc_layers * self.n_qubits)
-            model.q_params = nn.Parameter(
-                torch.normal(mean=0, std=np.pi, size=(param_size,)).to(self.device)
-            )
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            model = self.get_substitute_qnn(architecture)
+            optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
             subset_indices = np.random.choice(dataset_size, subset_size, replace=True)
             subset_data = [query_dataset[idx] for idx in subset_indices]
             inputs = np.concatenate([item[0] for item in subset_data])

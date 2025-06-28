@@ -86,6 +86,7 @@ def evaluate_model_with_metrics(models, data_loader, device, criterion=None, is_
     # Đây là một quy ước: chỉ các mô hình thay thế (QNN) trả về logits.
     # Các mô hình nạn nhân trả về xác suất.
     returns_logits = isinstance(models[0], QNN)
+    print(f"evaluate for {'substitution' if is_ensemble else 'victim'} model(s), returns_logits={returns_logits}")
     for model in models:
         model.to(device)
         model.eval()
