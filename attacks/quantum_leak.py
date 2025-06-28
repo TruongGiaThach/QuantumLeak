@@ -33,7 +33,6 @@ class ModelExtraction(ABC):
         self.save_path = save_path
         os.makedirs(save_path, exist_ok=True)
         self.circuit_device = circuit_device
-        self.qnn_zoo = self._create_qnn_zoo()
 
     def _create_L_circuit(self, n_layers):
         dev = qml.device(self.circuit_device, wires=self.n_qubits)
@@ -363,9 +362,6 @@ class QuantumLeak(ModelExtraction):
         ensemble_models = []
         history = {'train_loss': [], 'train_accuracy': []}
         
-        base_model = self.get_substitute_qnn(architecture)
-        base_circuit = base_model.quantum_circuit
-        vqc_layers = base_model.n_layers
         total_steps = n_committee * n_epochs
         pbar = tqdm(total=total_steps, desc="Training QuantumLeak Ensemble")
         for i in range(n_committee):
