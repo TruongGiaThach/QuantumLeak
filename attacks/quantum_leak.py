@@ -96,7 +96,7 @@ class ModelExtraction(ABC):
                 n_layers = int(architecture[1:])
             except ValueError:
                 raise ValueError(f"Kiến trúc không hợp lệ: {architecture}")
-            
+            circuit = self._create_L_circuit(n_layers)
             model = QNN(self.n_qubits, circuit, n_layers).to(self.device)
             model.q_params = nn.Parameter(
                 torch.tensor(np.random.normal(0, np.pi, (n_layers * self.n_qubits,)),
