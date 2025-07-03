@@ -27,7 +27,6 @@ def create_quantum_circuit(n_qubits=N_QUBITS, n_layers=N_LAYERS, device_name=QUA
             # Lớp vướng víu
             for i in range(n_qubits - 1):
                 qml.CZ(wires=[i, i + 1])
-                
-    return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
+        return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
     
     return circuit
