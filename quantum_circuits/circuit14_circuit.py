@@ -17,7 +17,7 @@ def create_circuit14(n_qubits, n_layers, device_name="lightning.qubit"):
     # Với n_qubits=6, crx_per_layer = 5 + 1 + 2 = 8.
     crx_per_layer = (n_qubits - 1) + 1 + 2
 
-    @qml.qnode(dev, interface='torch', diff_method='parameter-shift', max_diff=2) 
+    @qml.qnode(dev, interface='torch', diff_method='parameter-shift') 
     def circuit_14(inputs, weights, crx_weights):
         # inputs là vector đã được chuẩn hóa, có chiều dài 2^n_qubits
         qml.AmplitudeEmbedding(inputs, wires=range(n_qubits), normalize=True, pad_with=0.)
@@ -47,4 +47,6 @@ def create_circuit14(n_qubits, n_layers, device_name="lightning.qubit"):
 
         return [qml.expval(qml.PauliZ(j)) for j in range(n_qubits)]
         
-    return circuit_14, crx_per_layer
+    circuit_14_broadcasted = qml.transforms.broadcast_expand(circuit_14)
+
+    return circuit_14_broadcasted, crx_per_layer
