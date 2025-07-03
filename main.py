@@ -66,8 +66,8 @@ def run_basic_qnn_experiment():
     save_dir = os.path.join(SAVE_PATH, "basic_qnn")
     pipeline = CIFAR10DataPipeline(n_train=N_TRAIN, n_test=N_TEST, save_path=save_dir)
     train_loader, test_loader = get_cq_dataloaders(pipeline, batch_size=BATCH_SIZE, device=torch.device(DEVICE))
-    quantum_circuit = create_quantum_circuit()
-    model = BasicQNN(N_QUBITS, quantum_circuit).to(DEVICE)
+    quantum_circuit = create_quantum_circuit(n_qubits=N_QUBITS, n_layers=N_LAYERS)
+    model = BasicQNN(N_QUBITS, N_LAYERS, quantum_circuit).to(DEVICE)
     criterion = torch.nn.BCEWithLogitsLoss() 
 
     history, best_metrics = train_model(model, train_loader, test_loader, torch.device(DEVICE), criterion, N_EPOCHS, LEARNING_RATE, save_dir)

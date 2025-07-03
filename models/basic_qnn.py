@@ -3,11 +3,11 @@ import torch
 import torch.nn as nn
 
 class BasicQNN(nn.Module):
-    def __init__(self, n_qubits, quantum_circuit):
+    def __init__(self, n_qubits, n_layers, quantum_circuit):
         super(BasicQNN, self).__init__()
         self.conv = nn.Conv2d(1, 16, kernel_size=3, stride=2)
         self.pre_net = nn.Linear(16 * 15 * 15, n_qubits)
-        self.q_params = nn.Parameter(torch.randn(n_qubits))
+        self.q_params = nn.Parameter(torch.randn(n_layers, n_qubits))
         self.post_net = nn.Linear(n_qubits, 1)
         self.quantum_circuit = quantum_circuit
 
