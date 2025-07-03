@@ -37,14 +37,7 @@ class QuantumLayer(nn.Module):
         x = torch.nn.functional.normalize(x, p=2, dim=1)
         # ---------------------------
 
-        batch_size = x.size(0)
-        outputs = []
-        for i in range(batch_size):
-            q_out = self.quantum_circuit(x[i], self.weights, self.crx_weights)
-            q_out = torch.stack(q_out).float()
-            outputs.append(q_out)
-        
-        outputs = torch.stack(outputs)
+        outputs = self.quantum_circuit(x, self.weights, self.crx_weights)
         logits = self.fc(outputs)
         return logits
         
@@ -78,14 +71,7 @@ class PureQuantumCircuit14(nn.Module):
         x = self.downsample(inputs)
         x = x.view(x.size(0), -1)
         x = torch.nn.functional.normalize(x, p=2, dim=1, eps=1e-8)
-        batch_size = x.size(0)
-        outputs = []
-        for i in range(batch_size):
-            q_out = self.quantum_circuit(x[i], self.weights, self.crx_weights)
-            q_out = torch.stack(q_out).float()
-            outputs.append(q_out)
-        
-        outputs = torch.stack(outputs)
+        outputs = self.quantum_circuit(x, self.weights, self.crx_weights)
 
         logits  = self.fc(outputs)
         return logits 

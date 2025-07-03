@@ -111,7 +111,7 @@ class ModelExtraction(ABC):
 				torch.tensor(np.random.normal(0, np.pi, (12 * 2,)),
 							dtype=torch.float32, device=self.device, requires_grad=True)
 			)
-            return model
+            return model_a1
             
         elif architecture == 'A2':
             circuit_a2 = self._create_a2_circuit()
@@ -120,7 +120,7 @@ class ModelExtraction(ABC):
             	torch.tensor(np.random.normal(0, np.pi, (4 * 2,)),
                 	dtype=torch.float32, device=self.device, requires_grad=True)
 )
-            return model
+            return model_a2
             
         else:
             raise ValueError(f"Kiến trúc không xác định: {architecture}")

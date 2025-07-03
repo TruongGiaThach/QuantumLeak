@@ -263,7 +263,7 @@ def run_leak_experiment(model_type="basic_qnn"):
     )
 
 if __name__ == "__main__":
-    run_basic_qnn_experiment()
+    # run_basic_qnn_experiment()
     run_circuit14_experiment()
     run_pure_qnn_circuit14_experiment()
     run_transfer_learning_experiment()
