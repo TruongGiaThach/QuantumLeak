@@ -45,8 +45,8 @@ class QuantumLayer(nn.Module):
             outputs.append(q_out)
         
         outputs = torch.stack(outputs)
-        probs = self.fc(outputs).sigmoid()
-        return probs
+        logits = self.fc(outputs)
+        return logits
         
 class PureQuantumCircuit14(nn.Module):
     """
@@ -87,6 +87,5 @@ class PureQuantumCircuit14(nn.Module):
         
         outputs = torch.stack(outputs)
 
-        # 4. Lớp tuyến tính cuối cùng để ra logits
-        probs  = self.fc(outputs).sigmoid()
-        return probs 
+        logits  = self.fc(outputs)
+        return logits 

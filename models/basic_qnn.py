@@ -19,5 +19,5 @@ class BasicQNN(nn.Module):
         x_device = x.device
         x = [self.quantum_circuit(x[i], self.q_params) for i in range(batch_size)]
         x = torch.tensor(x, dtype=torch.float32, device=x_device)
-        x = torch.sigmoid(self.post_net(x))
-        return x
+        logits = self.post_net(x)
+        return logits

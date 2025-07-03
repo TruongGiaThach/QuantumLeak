@@ -30,12 +30,8 @@ def train_model(model, train_loader, val_loader, device, criterion, n_epochs, le
         running_loss = 0.0
         for inputs, labels in train_loader:
             inputs, labels = inputs.to(device), labels.to(device)
-            # Logic huấn luyện không đổi
             optimizer.zero_grad()
             outputs = model(inputs)
-            # Đối với victim models trả về xác suất, criterion là BCELoss
-            # Đối với substitute models trả về logits, criterion là BCEWithLogitsLoss
-            # Logic này đã tương thích
             loss = criterion(outputs, labels.view(-1, 1).float())
             loss.backward()
             optimizer.step()
@@ -57,7 +53,7 @@ def train_model(model, train_loader, val_loader, device, criterion, n_epochs, le
               f"Recall: {val_metrics['recall']:.2f}, "
               f"F1: {val_metrics['f1']:.2f}")
 
-        # --- NÂNG CẤP LOGIC LƯU TRỮ ---
+        # --- LOGIC LƯU TRỮ ---
         if val_metrics['accuracy'] > best_val_accuracy:
             print(f"  -> New best model found! Saving to {save_path}")
             best_val_accuracy = val_metrics['accuracy']
@@ -82,11 +78,6 @@ def evaluate_model_with_metrics(models, data_loader, device, criterion=None, is_
     if not isinstance(models, (list, tuple)):
         models = [models]
         
-	# Xác định xem mô hình có trả về logits không (dựa trên class QNN)
-    # Đây là một quy ước: chỉ các mô hình thay thế (QNN) trả về logits.
-    # Các mô hình nạn nhân trả về xác suất.
-    returns_logits = isinstance(models[0], QNN)
-    print(f"evaluate for {'substitution' if is_ensemble else 'victim'} model(s), returns_logits={returns_logits}")
     for model in models:
         model.to(device)
         model.eval()
@@ -103,7 +94,7 @@ def evaluate_model_with_metrics(models, data_loader, device, criterion=None, is_
             if is_ensemble:
                 ensemble_preds_tensor = []
                 for model in models:
-                    outputs = model(inputs) # Luôn là logits vì chỉ ensemble QNN
+                    outputs = model(inputs)
                     probs = torch.sigmoid(outputs).squeeze()
                     predicted = (probs >= 0.5).float()
                     ensemble_preds_tensor.append(predicted)
@@ -112,12 +103,7 @@ def evaluate_model_with_metrics(models, data_loader, device, criterion=None, is_
                 predicted, _ = torch.mode(stacked_preds, dim=1)
             else: # Single model
                 outputs = models[0](inputs)
-                if returns_logits:
-                    # Nếu là QNN, cần sigmoid để lấy xác suất
-                    probs = torch.sigmoid(outputs).squeeze()
-                else:
-                    # Nếu là victim model, nó đã trả về xác suất rồi
-                    probs = outputs.squeeze()
+                probs = torch.sigmoid(outputs).squeeze()
                 
                 predicted = (probs >= 0.5).float()
                 

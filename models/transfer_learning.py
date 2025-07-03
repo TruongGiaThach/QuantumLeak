@@ -34,7 +34,7 @@ class DressedQuantumCircuit(nn.Module):
         q_out = torch.zeros(x.size(0), self.n_qubits, dtype=torch.float32).to(x.device)
         for i in range(x.size(0)):
             q_out[i] = torch.tensor(self.quantum_circuit(x[i], self.weights), dtype=torch.float32).to(x.device)
-        return torch.sigmoid(self.post_net(q_out))
+        return self.post_net(q_out)
 
 class CQTransferLearningModel(nn.Module):
     def __init__(self, n_qubits, n_layers):
