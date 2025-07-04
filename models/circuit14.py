@@ -84,7 +84,14 @@ class PureQuantumCircuit14(nn.Module):
     def forward(self, inputs):
         x = self.downsample(inputs)
         x = x.view(x.size(0), -1)
-        x = torch.nn.functional.normalize(x, p=2, dim=1, eps=1e-8)
+        # --- THÊM BẢN VÁ LỖI MẠNH MẼ VÀO ĐÂY ---
+        norms = torch.norm(x, p=2, dim=1, keepdim=True)
+        zero_mask = (norms < 1e-8)
+        noise = torch.randn_like(x) * 1e-8
+        x = torch.where(zero_mask, noise, x)
+        # normalize=False trong mạch, nên chúng ta tự chuẩn hóa ở đây
+        x = torch.nn.functional.normalize(x, p=2, dim=1)
+        # ---------------------------------------------
         outputs = self.quantum_circuit(x, self.weights, self.crx_weights)
 
         if isinstance(outputs, list):

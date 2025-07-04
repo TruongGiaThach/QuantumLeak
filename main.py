@@ -110,7 +110,7 @@ def run_pure_qnn_circuit14_experiment():
     history, best_metrics = train_model(
         model, train_loader, test_loader, 
         torch.device(DEVICE), criterion, N_EPOCHS, 
-        LEARNING_RATE, save_dir
+        0.0001, save_dir
     )
     
     print_best_metrics("Pure QNN Circuit 14", best_metrics)
