@@ -10,8 +10,8 @@ DATA_PATH = "./data"
 # Hyperparameters
 N_EPOCHS = 30
 N_LAYERS = 2
-N_TRAIN = 50000 #5000
-N_TEST = 10000   #1000
+N_TRAIN = 5000 #5000
+N_TEST = 1000   #1000
 N_QUBITS = 4
 BATCH_SIZE = 8
 LEARNING_RATE = 0.001
@@ -27,7 +27,7 @@ LEAK_N_COMMITTEE = 3
 
 # Device
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-QUANTUM_DEVICE = "lightning.qubit" if torch.cuda.is_available() else "default.qubit"
+QUANTUM_DEVICE = "lightning.gpu" if torch.cuda.is_available() else "default.qubit"
 
 # Ensure directories exist
 os.makedirs(SAVE_PATH, exist_ok=True)

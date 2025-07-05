@@ -110,7 +110,7 @@ def run_pure_qnn_circuit14_experiment():
     history, best_metrics = train_model(
         model, train_loader, test_loader, 
         torch.device(DEVICE), criterion, N_EPOCHS, 
-        0.0001, save_dir
+        0.001, save_dir
     )
     
     print_best_metrics("Pure QNN Circuit 14", best_metrics)
@@ -264,11 +264,11 @@ def run_leak_experiment(model_type="basic_qnn"):
 
 if __name__ == "__main__":
     # run_basic_qnn_experiment()
-    run_circuit14_experiment()
-    run_pure_qnn_circuit14_experiment()
-    run_transfer_learning_experiment()
+    # run_pure_qnn_circuit14_experiment()
+    # run_circuit14_experiment()
+    # run_transfer_learning_experiment()
     # run_quanv_experiment()
-    # run_leak_experiment("basic_qnn")
-    # run_leak_experiment("circuit14")
-    # run_leak_experiment("transfer_learning")
-    # run_leak_experiment("pure_circuit14")
+    run_leak_experiment("basic_qnn")
+    run_leak_experiment("circuit14")
+    run_leak_experiment("transfer_learning")
+    run_leak_experiment("pure_circuit14")
