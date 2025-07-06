@@ -1,0 +1,5 @@
+thống nhất code: sẽ để việc query victim bên trong hàm train
+ hàm train của cloudleak cần nhận vào tham số có nhiễu hay k để trực quan hóa kết quả
+thực nghiệm đúng các bảng trong bài báo đã đề cập
+tối ưu trong ablation study cho đúng logic và tận dụng các model pretrain, adverseral sample đã tạo bnằng cách lưu kèm querybuget và tên mạch.
+tối ưu circuit 14 và pure circuit 14 bằng angle encoding

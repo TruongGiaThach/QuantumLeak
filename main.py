@@ -2,7 +2,7 @@ import torch
 import pandas as pd
 import numpy as np
 from configs.config import *
-from data.data_pipeline import CIFAR10DataPipeline, get_cq_dataloaders, create_out_of_domain_loader
+from data.data_pipeline import CIFAR10DataPipeline, get_cq_dataloaders, create_out_of_domain_loader, create_in_domain_loader
 from models.quanv_model import QuanvModel
 from models.basic_qnn import BasicQNN
 from models.circuit14 import QuantumLayer, PureQuantumCircuit14
@@ -131,17 +131,20 @@ def run_transfer_learning_experiment():
 
 def run_leak_experiment(model_type="basic_qnn"):
     pipeline = CIFAR10DataPipeline(n_train=N_LEAK_TRAIN, n_test=N_LEAK_TEST, save_path=SAVE_PATH)
-    train_loader, test_loader = get_cq_dataloaders(pipeline, batch_size=LEAK_BATCH_SIZE, device=torch.device(DEVICE))
+    _, test_loader = get_cq_dataloaders(pipeline, batch_size=LEAK_BATCH_SIZE, device=torch.device(DEVICE))
+    # Tạo các loader chuyên dụng cho tấn công
+    in_domain_loader = create_in_domain_loader(pipeline, batch_size=LEAK_BATCH_SIZE, n_samples=LEAK_QUERY_BUDGET, device=torch.device(DEVICE))
     out_of_domain_loader = create_out_of_domain_loader(pipeline, batch_size=LEAK_BATCH_SIZE, n_samples=3000)
+    
     if model_type == "basic_qnn":
         quantum_circuit = create_quantum_circuit()
-        victim_model = BasicQNN(N_LEAK_QUBITS, quantum_circuit).to(DEVICE)
+        victim_model = BasicQNN(N_QUBITS,N_LAYERS, quantum_circuit).to(DEVICE)
         victim_model.load_state_dict(torch.load(os.path.join(SAVE_PATH + "/basic_qnn", "best_model.pth")))
     elif model_type == "circuit14":
-        victim_model = QuantumLayer(N_LEAK_QUBITS, N_LEAK_LAYERS, QUANTUM_DEVICE).to(DEVICE)
+        victim_model = QuantumLayer(N_QUBITS, N_LAYERS, QUANTUM_DEVICE).to(DEVICE)
         victim_model.load_state_dict(torch.load(os.path.join(SAVE_PATH + "/circuit14", "best_model.pth")))
     elif model_type == "transfer_learning":
-        victim_model = CQTransferLearningModel(N_LEAK_QUBITS, N_LEAK_LAYERS).to(DEVICE)
+        victim_model = CQTransferLearningModel(N_QUBITS, N_LAYERS).to(DEVICE)
         victim_model.load_state_dict(torch.load(os.path.join(SAVE_PATH + "/transfer_learning", "best_model.pth")))
     elif model_type == "pure_circuit14":
         print("Loading PureQuantumCircuit14 as the victim model...")
@@ -170,33 +173,36 @@ def run_leak_experiment(model_type="basic_qnn"):
         save_path=QUANTUM_LEAK_SAVE_PATH,
         circuit_device=QUANTUM_DEVICE
     )
-    query_dataset = cloud_leak.query_victim(train_loader, n_rounds=3)
+    # 2. Tạo một loader tạm thời từ resource pool để truy vấn cho QuantumLeak
+    print("--- Querying for QuantumLeak using the temporary loader ---")
+    query_dataset = quantum_leak.query_victim(in_domain_loader, n_rounds=3)
+    
     query_outputs = np.concatenate([item[1][:, 1] for item in query_dataset])
     print(f"Query dataset noise check - Mean probability: {query_outputs.mean():.4f}, Std: {query_outputs.std():.4f}")
     print("Training CloudLeak Single-N...")
     single_n_model, single_n_history = cloud_leak.train(
-        query_dataset, out_of_domain_loader, n_epochs=2, batch_size=LEAK_BATCH_SIZE, architecture='L2', loss_type='nll'
+        in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture='L2', loss_type='nll'
     )
     single_n_metrics = cloud_leak.evaluate(single_n_model, test_loader)
     print(f"CloudLeak Single-N Metrics: Accuracy: {single_n_metrics['accuracy']:.2f}%, "
           f"Precision: {single_n_metrics['precision']:.2f}, Recall: {single_n_metrics['recall']:.2f}, F1: {single_n_metrics['f1']:.2f}")
     print("Training CloudLeak Single-H...")
     single_h_model, single_h_history = cloud_leak.train(
-        query_dataset, out_of_domain_loader, n_epochs=2, batch_size=LEAK_BATCH_SIZE, architecture='L2', loss_type='huber'
+        in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture='L2', loss_type='huber'
     )
     single_h_metrics = cloud_leak.evaluate(single_h_model, test_loader)
     print(f"CloudLeak Single-H Metrics: Accuracy: {single_h_metrics['accuracy']:.2f}%, "
           f"Precision: {single_h_metrics['precision']:.2f}, Recall: {single_h_metrics['recall']:.2f}, F1: {single_h_metrics['f1']:.2f}")
     print("Training QuantumLeak Ens-N...")
     ens_n_models, ens_n_history = quantum_leak.train(
-        query_dataset, out_of_domain_loader, n_epochs=2, batch_size=LEAK_BATCH_SIZE, architecture='L2', loss_type='nll'
+        query_dataset, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture='L2', loss_type='nll'
     )
     ens_n_metrics = quantum_leak.evaluate(test_loader)
     print(f"QuantumLeak Ens-N Metrics: Accuracy: {ens_n_metrics['accuracy']:.2f}%, "
           f"Precision: {ens_n_metrics['precision']:.2f}, Recall: {ens_n_metrics['recall']:.2f}, F1: {ens_n_metrics['f1']:.2f}")
     print("Training QuantumLeak Ens-H...")
     ens_h_models, ens_h_history = quantum_leak.train(
-        query_dataset, out_of_domain_loader, n_epochs=2, batch_size=LEAK_BATCH_SIZE, architecture='L2', loss_type='huber'
+        query_dataset, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture='L2', loss_type='huber'
     )
     ens_h_metrics = quantum_leak.evaluate(test_loader)
     print(f"QuantumLeak Ens-H Metrics: Accuracy: {ens_h_metrics['accuracy']:.2f}%, "
@@ -245,22 +251,22 @@ def run_leak_experiment(model_type="basic_qnn"):
     table4_df.to_csv(os.path.join(QUANTUM_LEAK_SAVE_PATH, 'table4.csv'), index=False)
     print("\nTable IV: Comparison of Victim QNN, CloudLeak, and QuantumLeak")
     print(table4_df)
-    print("\nRunning ablation study for Figure 5, 6, 7, 8...")
-    results = quantum_leak.ablation_study(
-        train_loader, test_loader, out_of_domain_loader,
-        query_budgets=[1500, 3000, 6000],
-        architectures=['L1', 'L2', 'L3', 'A1', 'A2'],
-        committee_numbers=[3, 5, 7],
-        epochs=N_LEAK_EPOCHS
-    )
-    results_df = pd.read_csv(os.path.join(QUANTUM_LEAK_SAVE_PATH, 'ablation_results.csv'))
-    quantum_leak.plot_ablation_results(results_df)
-    plot_model_comparison(
-        [victim_metrics['accuracy'], single_h_metrics['accuracy'], ens_h_metrics['accuracy']],
-        ['Victim QNN', 'CloudLeak Single-H', 'QuantumLeak Ens-H'],
-        QUANTUM_LEAK_SAVE_PATH,
-        f"{model_type.capitalize()} Model Comparison"
-    )
+    # print("\nRunning ablation study for Figure 5, 6, 7, 8...")
+    # results = quantum_leak.ablation_study(
+    #     train_loader, test_loader, out_of_domain_loader,
+    #     query_budgets=[1500, 3000, 6000],
+    #     architectures=['L1', 'L2', 'L3', 'A1', 'A2'],
+    #     committee_numbers=[3, 5, 7],
+    #     epochs=N_LEAK_EPOCHS
+    # )
+    # results_df = pd.read_csv(os.path.join(QUANTUM_LEAK_SAVE_PATH, 'ablation_results.csv'))
+    # quantum_leak.plot_ablation_results(results_df)
+    # plot_model_comparison(
+    #     [victim_metrics['accuracy'], single_h_metrics['accuracy'], ens_h_metrics['accuracy']],
+    #     ['Victim QNN', 'CloudLeak Single-H', 'QuantumLeak Ens-H'],
+    #     QUANTUM_LEAK_SAVE_PATH,
+    #     f"{model_type.capitalize()} Model Comparison"
+    # )
 
 if __name__ == "__main__":
     # run_basic_qnn_experiment()

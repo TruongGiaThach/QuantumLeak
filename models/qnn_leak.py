@@ -1,28 +1,49 @@
- 
+# models/qnn_leak.py
 import torch
 import torch.nn as nn
 import pennylane as qml
 import numpy as np
 
 class QNN(nn.Module):
-    def __init__(self, n_qubits, quantum_circuit, n_layers):
+    """
+    Lớp mô hình thay thế (substitute) linh hoạt cho toàn bộ QNN Zoo.
+    Sử dụng kiến trúc lai: Pool + Linear -> Quantum Circuit -> Linear.
+    Nhận các tham số động để xây dựng các mạch khác nhau.
+    """
+    def __init__(self, n_qubits, quantum_circuit, params_shape: dict, device):
         super(QNN, self).__init__()
+        
+        # Phần cổ điển
         self.pool = nn.AvgPool2d(kernel_size=8, stride=8)
-        self.pre_net = nn.Linear(16, 16)
-        self.q_params = nn.Parameter(torch.normal(mean=0, std=np.pi, size=(n_layers * n_qubits,)))
+        self.pre_net = nn.Linear(16, n_qubits)
         self.post_net = nn.Linear(n_qubits, 1)
+        
+        # Phần lượng tử
         self.quantum_circuit = quantum_circuit
-        self.n_qubits = n_qubits
-        self.n_layers = n_layers
+
+        # Khởi tạo các tham số theo phân phối Gaussian
+        self.q_weights = None
+        self.q_crx_weights = None
+
+        if 'weights' in params_shape and params_shape['weights'] is not None:
+            init_data = np.random.normal(0, np.pi, params_shape['weights'])
+            self.q_weights = nn.Parameter(torch.tensor(init_data, dtype=torch.float32, device=device))
+        
+        if 'crx_weights' in params_shape and params_shape['crx_weights'] is not None:
+            init_data = np.random.normal(0, np.pi, params_shape['crx_weights'])
+            self.q_crx_weights = nn.Parameter(torch.tensor(init_data, dtype=torch.float32, device=device))
 
     def forward(self, x):
         x = self.pool(x)
         x = x.view(-1, 16)
         x = torch.tanh(self.pre_net(x))
-        batch_size = x.size(0)
-        x_device = x.device
-        x = torch.nn.functional.normalize(x, p=2, dim=1)
-        x = [self.quantum_circuit(x[i], self.q_params) for i in range(batch_size)]
-        x = torch.tensor(x, dtype=torch.float32, device=x_device)
-        logits = self.post_net(x)
-        return logits
+
+        # Mạch lượng tử nhận vào x và một dict các tham số
+        outputs = self.quantum_circuit(x, self.q_weights, self.q_crx_weights)
+        
+        if isinstance(outputs, list):
+             outputs = torch.stack(outputs)
+        if len(outputs.shape) > 1 and outputs.shape[0] != x.shape[0] and outputs.shape[1] == x.shape[0]:
+             outputs = outputs.t()
+
+        return self.post_net(outputs)

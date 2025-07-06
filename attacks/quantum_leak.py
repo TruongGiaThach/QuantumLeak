@@ -10,6 +10,7 @@ from models.qnn_leak import QNN
 from utils.visualization import plot_model_comparison
 from utils.training import evaluate_model_with_metrics
 from abc import ABC, abstractmethod
+from quantum_circuits.substitution_circuit import create_substitute_circuit
 
 class HuberLoss(nn.Module):
     def __init__(self, delta=1.0):
@@ -35,56 +36,51 @@ class ModelExtraction(ABC):
         self.circuit_device = circuit_device
 
     def _create_L_circuit(self, n_layers):
-        dev = qml.device(self.circuit_device, wires=self.n_qubits)
-        @qml.qnode(dev, interface="torch", diff_method="parameter-shift")
-        def circuit(inputs, weights):
-            qml.AmplitudeEmbedding(inputs, wires=range(self.n_qubits), normalize=True)
-            for layer in range(n_layers):
-                for i in range(self.n_qubits):
-                    qml.RY(weights[layer * self.n_qubits + i], wires=i)
-                for i in range(self.n_qubits):
-                    qml.CZ(wires=[i, (i + 1) % self.n_qubits])
-            return [qml.expval(qml.PauliZ(i)) for i in range(self.n_qubits)]
-        return circuit
+        """Tạo mạch Circuit14."""
+        circuit_qnode, params_shape = create_substitute_circuit(
+            self.n_qubits, n_layers, self.circuit_device
+        )
+        return circuit_qnode, params_shape
 
     def _create_a1_circuit(self):
         dev = qml.device(self.circuit_device, wires=self.n_qubits)
         @qml.qnode(dev, interface="torch", diff_method="parameter-shift")
-        def circuit(inputs, weights):
+        def circuit(inputs, weights, crx_weights=None):
             qml.AmplitudeEmbedding(inputs, wires=range(self.n_qubits), normalize=True)
             param_idx = 0
             for _ in range(2):
                 for i in range(self.n_qubits):
-                    qml.RX(weights[param_idx], wires=i)
-                    param_idx += 1
-                    qml.RY(weights[param_idx], wires=i)
-                    param_idx += 1
-                    qml.RZ(weights[param_idx], wires=i)
-                    param_idx += 1
+                    qml.RX(weights[param_idx], wires=i); param_idx += 1
+                    qml.RY(weights[param_idx], wires=i); param_idx += 1
+                    qml.RZ(weights[param_idx], wires=i); param_idx += 1
                 for i in range(self.n_qubits):
                     qml.CNOT(wires=[i, (i + 1) % self.n_qubits])
             return [qml.expval(qml.PauliZ(i)) for i in range(self.n_qubits)]
-        return circuit
+        params_shape = {
+            'weights': (2, self.n_qubits, 2), # 2 lớp, n_qubits, 2 cổng (RY, RZ)
+            'crx_weights': None # Mạch này không dùng crx_weights có tham số
+        }
+        return qml.transforms.broadcast_expand(circuit), params_shape
 
     def _create_a2_circuit(self):
         dev = qml.device(self.circuit_device, wires=self.n_qubits)
         @qml.qnode(dev, interface="torch", diff_method="parameter-shift")
-        def circuit(inputs, weights):
+        def circuit(inputs,  weights, crx_weights=None):
             qml.AmplitudeEmbedding(inputs, wires=range(self.n_qubits), normalize=True)
             param_idx = 0
             for _ in range(2):
-                qml.RX(weights[param_idx], wires=0)
-                param_idx += 1
-                qml.RY(weights[param_idx], wires=1)
-                param_idx += 1
-                qml.RZ(weights[param_idx], wires=2)
-                param_idx += 1
-                qml.RX(weights[param_idx], wires=3)
-                param_idx += 1
+                qml.RX(weights[param_idx], wires=0); param_idx += 1
+                qml.RY(weights[param_idx], wires=1); param_idx += 1
+                qml.RZ(weights[param_idx], wires=2); param_idx += 1
+                qml.RX(weights[param_idx], wires=3); param_idx += 1
                 for i in range(self.n_qubits):
                     qml.CNOT(wires=[i, (i + 1) % self.n_qubits])
             return [qml.expval(qml.PauliZ(i)) for i in range(self.n_qubits)]
-        return circuit
+        params_shape = {
+            'weights': (2, self.n_qubits, 3), # 2 lớp, n_qubits, 3 cổng (RZ,RY,RZ)
+            'crx_weights': (2, self.n_qubits) # 2 lớp, n_qubits cổng CRX
+        }
+        return qml.transforms.broadcast_expand(circuit), params_shape
 
     
     def get_substitute_qnn(self, architecture: str):
@@ -92,38 +88,24 @@ class ModelExtraction(ABC):
         Tạo và trả về một INSTANCE QNN MỚI dựa trên tên kiến trúc.
         """
         if architecture.startswith('L'):
-            try:
-                n_layers = int(architecture[1:])
-            except ValueError:
-                raise ValueError(f"Kiến trúc không hợp lệ: {architecture}")
-            circuit = self._create_L_circuit(n_layers)
-            model = QNN(self.n_qubits, circuit, n_layers).to(self.device)
-            model.q_params = nn.Parameter(
-                torch.tensor(np.random.normal(0, np.pi, (n_layers * self.n_qubits,)),
-                             dtype=torch.float32, device=self.device, requires_grad=True)
-            )
-            return model
-
+            n_layers = int(architecture[1:])
+            circuit, params_shape = self._create_L_circuit(n_layers)
         elif architecture == 'A1':
-            circuit_a1 = self._create_a1_circuit()
-            model_a1 = QNN(self.n_qubits, circuit_a1, n_layers=6).to(self.device)
-            model_a1.q_params = nn.Parameter(
-				torch.tensor(np.random.normal(0, np.pi, (12 * 2,)),
-							dtype=torch.float32, device=self.device, requires_grad=True)
-			)
-            return model_a1
-            
+            circuit, params_shape = self._create_a1_circuit()
         elif architecture == 'A2':
-            circuit_a2 = self._create_a2_circuit()
-            model_a2 = QNN(self.n_qubits, circuit_a2, n_layers=4).to(self.device)
-            model_a2.q_params = nn.Parameter(
-            	torch.tensor(np.random.normal(0, np.pi, (4 * 2,)),
-                	dtype=torch.float32, device=self.device, requires_grad=True)
-)
-            return model_a2
-            
+            circuit, params_shape = self._create_a2_circuit()
         else:
             raise ValueError(f"Kiến trúc không xác định: {architecture}")
+
+        # Tất cả model đều được tạo từ cùng một lớp, chỉ khác nhau về mạch và shape của tham số
+        model = QNN(
+            n_qubits=self.n_qubits,
+            quantum_circuit=circuit,
+            params_shape=params_shape,
+            device=self.device
+        ).to(self.device)
+        
+        return model
 
     def qnnaas_predict(self, model, images, device):
         model.eval()
@@ -146,8 +128,8 @@ class ModelExtraction(ABC):
         with torch.no_grad():
             for round in range(n_rounds):
                 samples_collected = 0
-                for inputs, _ in data_loader:
-                    inputs = inputs.to(self.device)
+                for batch in data_loader:
+                    inputs = batch[0].to(self.device)
                     outputs = self.qnnaas_predict(self.victim_model, inputs, self.device)
                     noise_scale = spam_noise + gate_1q_noise + gate_2q_noise + crosstalk_noise
                     noise = torch.randn_like(outputs) * noise_scale
@@ -171,7 +153,7 @@ class ModelExtraction(ABC):
         
         with torch.no_grad():
             # Sử dụng mô hình thay thế để tìm các điểm "mong manh"
-            outputs = substitute_model(inputs_tensor) # Giả sử model trả về logits
+            outputs = substitute_model(inputs_tensor) # model trả về logits
             probs = torch.sigmoid(outputs).squeeze()
 
             # Tìm các mẫu gần ranh giới quyết định (0.5)
@@ -248,7 +230,7 @@ class CloudLeak(ModelExtraction):
             print(f"No pretrained model found at {pretrained_path}")
             return None
 
-    def train(self, query_dataset, out_of_domain_loader, n_epochs=20, batch_size=8, architecture='L2', loss_type='nll'):
+    def train(self, in_domain_source_loader, out_of_domain_loader, n_epochs=20, batch_size=8, architecture='L2', loss_type='nll'):
         """
         Huấn luyện CloudLeak
         """
@@ -275,7 +257,7 @@ class CloudLeak(ModelExtraction):
         else:
             print("Chưa có tập đối kháng, bắt đầu tạo...")
             # 2.1. Chuẩn bị nguồn tài nguyên (resource pool)
-            in_domain_pool = np.concatenate([item[0] for item in query_dataset])
+            in_domain_pool = np.concatenate([batch[0].cpu().numpy() for batch in in_domain_source_loader])
             out_domain_pool_list = [item[0].cpu().numpy() for i, item in enumerate(out_of_domain_loader) if i * batch_size < 512]
             out_domain_pool = np.concatenate(out_domain_pool_list)[:512]
             resource_pool = np.concatenate([in_domain_pool, out_domain_pool])
@@ -299,12 +281,7 @@ class CloudLeak(ModelExtraction):
         labeled_adversarial_dataset = []
         adv_loader = DataLoader(TensorDataset(adversarial_query_set_tensor), batch_size=batch_size)
         
-        for adv_batch_tensor, in tqdm(adv_loader, desc="Truy vấn nạn nhân với các mẫu đối kháng"):
-            outputs_prob = self.qnnaas_predict(self.victim_model, adv_batch_tensor, self.device)
-            # Lưu lại cặp (ảnh đối kháng, nhãn từ victim)
-            labeled_adversarial_dataset.append(
-                (adv_batch_tensor.cpu().numpy(), outputs_prob.cpu().numpy())
-            )
+        labeled_adversarial_dataset = self.query_victim(adv_loader, n_rounds=1)
 
         # Gộp kết quả
         final_inputs = np.concatenate([item[0] for item in labeled_adversarial_dataset])

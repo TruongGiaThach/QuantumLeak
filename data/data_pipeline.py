@@ -123,3 +123,41 @@ def create_out_of_domain_loader(pipeline, batch_size=8, n_samples=3000):
     out_loader = DataLoader(out_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     print(f"Out-of-domain loader: {len(out_dataset)} samples, {len(out_loader)} batches")
     return out_loader
+
+def create_in_domain_loader(pipeline, batch_size=8, n_samples=6000, device=torch.device("cpu")):
+    """
+    Tạo một loader chứa chính xác N mẫu trong miền (in-domain) để làm nguồn truy vấn.
+    Loader này chỉ chứa ảnh, không chứa nhãn gốc.
+    """
+    print(f"Creating in-domain query source loader with {n_samples} samples...")
+    # Lấy toàn bộ dữ liệu train
+    train_images, train_labels, _, _ = pipeline.load_data(qanv=False)
+    
+    # Lọc ra các mẫu thuộc lớp 0 và 1
+    in_domain_idx = np.isin(train_labels, [0, 1])
+    in_domain_images = train_images[in_domain_idx]
+
+    # Lấy chính xác số lượng mẫu cần thiết
+    if len(in_domain_images) < n_samples:
+        print(f"  Warning: Only {len(in_domain_images)} in-domain images available, requested {n_samples}.")
+        n_samples = len(in_domain_images)
+    
+    in_domain_images = in_domain_images[:n_samples]
+
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Grayscale(num_output_channels=1),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,))
+    ])
+    
+    in_domain_images_torch = torch.stack([transform(img) for img in in_domain_images]).float().to(device)
+    
+    # Tạo dataset chỉ chứa ảnh (không cần nhãn)
+    in_domain_dataset = TensorDataset(in_domain_images_torch)
+    # shuffle=False để đảm bảo tính nhất quán giữa các lần chạy
+    in_domain_loader = DataLoader(in_domain_dataset, batch_size=batch_size, shuffle=False)
+    
+    print(f"  -> In-domain loader created with {len(in_domain_dataset)} samples.")
+    return in_domain_loader
+# -----------------------------
