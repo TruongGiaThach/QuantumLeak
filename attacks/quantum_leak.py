@@ -117,29 +117,40 @@ class ModelExtraction(ABC):
             prob_vectors = torch.cat([prob_class_0, prob_class_1], dim=1)
         return prob_vectors
 
-    def query_victim(self, data_loader, n_rounds=3):
+    def query_victim(self, data_loader, n_rounds=3, add_noise=True):
+        """
+        Truy vấn Victim Model với tùy chọn thêm nhiễu NISQ.
+        Args:
+            data_loader: DataLoader chứa ảnh (chỉ ảnh, không nhãn).
+            n_rounds: Số vòng truy vấn.
+            add_noise: Có thêm nhiễu NISQ hay không.
+        Returns:
+            query_dataset: Danh sách các cặp (inputs, noisy_outputs).
+        """
         self.victim_model.eval()
         query_dataset = []
         samples_per_round = self.query_budget // n_rounds
-        spam_noise = 0.0054
-        gate_1q_noise = 0.00177
-        gate_2q_noise = 0.0287
-        crosstalk_noise = 0.2
+        spam_noise = 0.0054 if add_noise else 0.0
+        gate_1q_noise = 0.00177 if add_noise else 0.0
+        gate_2q_noise = 0.0287 if add_noise else 0.0
+        crosstalk_noise = 0.2 if add_noise else 0.0
         with torch.no_grad():
             for round in range(n_rounds):
                 samples_collected = 0
-                for batch in data_loader:
+                for batch in tqdm(data_loader, desc=f"Query round {round + 1}/{n_rounds}"):
                     inputs = batch[0].to(self.device)
                     outputs = self.qnnaas_predict(self.victim_model, inputs, self.device)
-                    noise_scale = spam_noise + gate_1q_noise + gate_2q_noise + crosstalk_noise
-                    noise = torch.randn_like(outputs) * noise_scale
-                    noisy_outputs = outputs + noise
-                    noisy_outputs = torch.clamp(noisy_outputs, 0, 1)
+                    if add_noise:
+                        noise_scale = spam_noise + gate_1q_noise + gate_2q_noise + crosstalk_noise
+                        noise = torch.randn_like(outputs) * noise_scale
+                        noisy_outputs = outputs + noise
+                        noisy_outputs = torch.clamp(noisy_outputs, 0, 1)
+                    else:
+                        noisy_outputs = outputs
                     query_dataset.append((inputs.cpu().numpy(), noisy_outputs.cpu().numpy()))
                     samples_collected += inputs.size(0)
                     if samples_collected >= samples_per_round:
                         break
-                print(f"Completed query round {round + 1}/{n_rounds}")
         return query_dataset
 
     def generate_adversarial_samples(self, substitute_model, inputs, epsilon=0.1):
@@ -183,7 +194,7 @@ class ModelExtraction(ABC):
         pass
 
 class CloudLeak(ModelExtraction):
-    def pretrain(self, public_loader, n_epochs=10, batch_size=8, architecture='L2', save=True):
+    def pretrain(self, public_loader, n_epochs=10, batch_size=8, architecture='L2',save=True):
         criterion = nn.BCEWithLogitsLoss()
         model = self.get_substitute_qnn(architecture)
         
@@ -213,15 +224,14 @@ class CloudLeak(ModelExtraction):
             history['pretrain_accuracy'].append(accuracy)
             pbar.set_postfix(loss=f"{avg_loss:.4f}", acc=f"{accuracy:.2f}%")
         if save:
-            save_path = os.path.join(self.save_path, f'pretrained_cloudleak_{architecture}.pth')
+            save_path = os.path.join(self.save_path, f'pretrained_cloudleak_{architecture}_q{self.query_budget}.pth')
             torch.save(model.state_dict(), save_path)
             print(f"Pretrained model saved to {save_path}")
         return model, history
 
     def load_pretrained_model(self, architecture='L2'):
-        
         model = self.get_substitute_qnn(architecture)
-        pretrained_path = os.path.join(self.save_path, f'pretrained_cloudleak_{architecture}.pth')
+        pretrained_path = os.path.join(self.save_path, f'pretrained_cloudleak_{architecture}_q{self.query_budget}.pth')
         if os.path.exists(pretrained_path):
             model.load_state_dict(torch.load(pretrained_path, map_location=self.device))
             print(f"Loaded pretrained model from {pretrained_path}")
@@ -230,9 +240,20 @@ class CloudLeak(ModelExtraction):
             print(f"No pretrained model found at {pretrained_path}")
             return None
 
-    def train(self, in_domain_source_loader, out_of_domain_loader, n_epochs=20, batch_size=8, architecture='L2', loss_type='nll'):
+    def train(self, in_domain_source_loader, out_of_domain_loader, n_epochs=20, batch_size=8, architecture='L2', loss_type='nll', add_noise=True):
         """
         Huấn luyện CloudLeak
+        Args:
+            in_domain_source_loader: DataLoader chứa 6000 ảnh in-domain (chỉ ảnh).
+            out_of_domain_loader: DataLoader chứa 3000 ảnh out-of-domain (có nhãn).
+            n_epochs: Số epoch để fine-tune.
+            batch_size: Kích thước batch.
+            architecture: Kiến trúc VQC ('L1', 'L2', 'L3', 'A1', 'A2').
+            loss_type: Loại loss ('nll' hoặc 'huber').
+            add_noise: Có thêm nhiễu NISQ khi truy vấn Victim Model hay không.
+        Returns:
+            model: Mô hình đã fine-tune.
+            history: Lịch sử huấn luyện.
         """
         
         # === GIAI ĐOẠN 1: TIỀN HUẤN LUYỆN ===
@@ -249,7 +270,7 @@ class CloudLeak(ModelExtraction):
         # === GIAI ĐOẠN 2: XÂY DỰNG TẬP DỮ LIỆU TRUY VẤN ĐỐI KHÁNG ===
         print("\n--- CloudLeak: Giai đoạn 2: Xây dựng tập dữ liệu truy vấn đối kháng ---")
         
-        adversarial_set_path = os.path.join(self.save_path, f'cloudleak_adversarial_set_{architecture}.npy')
+        adversarial_set_path = os.path.join(self.save_path, f'cloudleak_adversarial_set_{architecture}_q{self.query_budget}.npy')
         
         if os.path.exists(adversarial_set_path):
             print(f"Đang tải tập đối kháng đã tạo từ: {adversarial_set_path}")
@@ -281,7 +302,7 @@ class CloudLeak(ModelExtraction):
         labeled_adversarial_dataset = []
         adv_loader = DataLoader(TensorDataset(adversarial_query_set_tensor), batch_size=batch_size)
         
-        labeled_adversarial_dataset = self.query_victim(adv_loader, n_rounds=1)
+        labeled_adversarial_dataset = self.query_victim(adv_loader, n_rounds=1, add_noise=add_noise)
 
         # Gộp kết quả
         final_inputs = np.concatenate([item[0] for item in labeled_adversarial_dataset])
@@ -316,8 +337,9 @@ class CloudLeak(ModelExtraction):
             avg_loss = running_loss / len(final_loader)
             pbar.set_postfix(loss=f"{avg_loss:.4f}")
         
-        print("Hoàn thành huấn luyện CloudLeak.")
+        print(f"Hoàn thành huấn luyện CloudLeak ({'noisy' if add_noise else 'clean'} queries).")
         return model, history
+    
     def evaluate(self, model, test_loader):
         metrics = evaluate_model_with_metrics(model, test_loader, self.device)
         return metrics
@@ -386,114 +408,4 @@ class QuantumLeak(ModelExtraction):
         metrics = evaluate_model_with_metrics(self.ensemble_models, test_loader, self.device, is_ensemble=True)
         return metrics
 
-    def ablation_study(self, data_loader, test_loader, out_of_domain_loader, query_budgets=[1500, 3000, 6000], architectures=['L1', 'L2', 'L3', 'A1', 'A2'], committee_numbers=[3, 5, 7], epochs=30):
-        results = []
-        cloud_leak = CloudLeak(
-            self.victim_model, self.n_qubits, self.query_budget, self.device, self.save_path, self.circuit_device
-        )
-        public_inputs, public_targets = [], []
-        for inputs, targets in out_of_domain_loader:
-            public_inputs.append(inputs.cpu().numpy())
-            public_targets.append(targets.cpu().numpy())
-        public_inputs = np.concatenate(public_inputs)[:3000]
-        public_targets = np.concatenate(public_targets)[:3000]
-        public_dataset = TensorDataset(
-            torch.tensor(public_inputs, dtype=torch.float32),
-            torch.tensor(public_targets, dtype=torch.float32)
-        )
-        public_loader = DataLoader(public_dataset, batch_size=8, shuffle=True)
-        cloud_leak.pretrain(public_loader, n_epochs=10, batch_size=8, architecture='L2')
-        for query_budget in query_budgets:
-            self.query_budget = query_budget
-            query_dataset = self.query_victim(data_loader, n_rounds=3)
-            for architecture in architectures:
-                for n_committee in committee_numbers:
-                    for scheme in ['Single-N', 'Single-H', 'Ens-N', 'Ens-H']:
-                        if 'Single' in scheme:
-                            loss_type = 'nll' if scheme == 'Single-N' else 'huber'
-                            model, _ = cloud_leak.train(
-                                query_dataset, out_of_domain_loader, n_epochs=20,
-                                batch_size=8, architecture=architecture, loss_type=loss_type
-                            )
-                            metrics = cloud_leak.evaluate(model, test_loader)
-                        else:
-                            loss_type = 'nll' if scheme == 'Ens-N' else 'huber'
-                            ensemble_models, _ = self.train_ensemble(
-                                query_dataset, n_epochs=epochs, batch_size=8, architecture=architecture,
-                                loss_type=loss_type, n_committee=n_committee
-                            )
-                            metrics = self.evaluate(test_loader)
-                        results.append({
-                            'Query Budget': query_budget,
-                            'Architecture': architecture,
-                            'Committee': n_committee,
-                            'Scheme': scheme,
-                            'Accuracy': metrics['accuracy'],
-                            'Precision': metrics['precision'],
-                            'Recall': metrics['recall'],
-                            'F1': metrics['f1']
-                        })
-                        print(f"Query Budget: {query_budget}, Architecture: {architecture}, Committee: {n_committee}, "
-                              f"Scheme: {scheme}, Accuracy: {metrics['accuracy']:.2f}%, "
-                              f"Precision: {metrics['precision']:.2f}, Recall: {metrics['recall']:.2f}, F1: {metrics['f1']:.2f}")
-        results_df = pd.DataFrame(results)
-        results_df.to_csv(os.path.join(self.save_path, 'ablation_results.csv'), index=False)
-        return results
-
-    def plot_ablation_results(self, results_df):
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(10, 6))
-        df_fig4 = results_df[(results_df['Query Budget'] == 6000) & (results_df['Architecture'] == 'L2') & (results_df['Committee'] == 5)]
-        schemes = df_fig4['Scheme'].values
-        accuracies = df_fig4['Accuracy'].values
-        plt.bar(schemes, accuracies, color=['blue', 'green', 'orange', 'red'])
-        plt.xlabel('Attack Scheme')
-        plt.ylabel('Accuracy (%)')
-        plt.title('Figure 4: Comparison of Attack Schemes')
-        plt.savefig(os.path.join(self.save_path, 'figure4.png'))
-        plt.close()
-        plt.figure(figsize=(10, 6))
-        df_fig5 = results_df[(results_df['Query Budget'] == 6000) & (results_df['Scheme'] == 'Ens-H') & (results_df['Committee'] == 5)]
-        architectures = df_fig5['Architecture'].values
-        accuracies = df_fig5['Accuracy'].values
-        plt.bar(architectures, accuracies, color='purple')
-        plt.xlabel('VQC Architecture')
-        plt.ylabel('Accuracy (%)')
-        plt.title('Figure 5: Impact of VQC Ansatz')
-        plt.savefig(os.path.join(self.save_path, 'figure5.png'))
-        plt.close()
-        plt.figure(figsize=(10, 6))
-        df_fig6 = results_df[(results_df['Query Budget'] == 6000) & (results_df['Architecture'] == 'L2') & (results_df['Scheme'] == 'Ens-H')]
-        committees = df_fig6['Committee'].values
-        accuracies = df_fig6['Accuracy'].values
-        plt.plot(committees, accuracies, marker='o', label='Ens-H')
-        plt.xlabel('Number of Committee Members')
-        plt.ylabel('Accuracy (%)')
-        plt.title('Figure 6: Impact of Committee Number')
-        plt.legend()
-        plt.savefig(os.path.join(self.save_path, 'figure6.png'))
-        plt.close()
-        plt.figure(figsize=(10, 6))
-        for arch in ['L1', 'L2', 'L3']:
-            df_fig7 = results_df[(results_df['Architecture'] == arch) & (results_df['Scheme'] == 'Ens-H') & (results_df['Committee'] == 5)]
-            query_budgets = df_fig7['Query Budget'].values
-            accuracies = df_fig7['Accuracy'].values
-            plt.plot(query_budgets, accuracies, marker='o', label=f'{arch}')
-        plt.xlabel('Query Budget')
-        plt.ylabel('Accuracy (%)')
-        plt.title('Figure 7: Performance with Different VQC Layers')
-        plt.legend()
-        plt.savefig(os.path.join(self.save_path, 'figure7.png'))
-        plt.close()
-        plt.figure(figsize=(10, 6))
-        for arch in ['L1', 'L2', 'L3']:
-            df_fig8 = results_df[(results_df['Architecture'] == arch) & (results_df['Scheme'] == 'Ens-H') & (results_df['Committee'] == 5)]
-            query_budgets = df_fig8['Query Budget'].values
-            accuracies = df_fig8['Accuracy'].values
-            plt.plot(query_budgets, accuracies, marker='o', label=f'{arch}')
-        plt.xlabel('Query Budget')
-        plt.ylabel('Accuracy (%)')
-        plt.title('Figure 8: Performance with Query Budgets')
-        plt.legend()
-        plt.savefig(os.path.join(self.save_path, 'figure8.png'))
-        plt.close()
+    
