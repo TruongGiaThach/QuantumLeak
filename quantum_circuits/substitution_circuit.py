@@ -8,7 +8,7 @@ def create_substitute_circuit(n_qubits, n_layers, device_name="lightning.qubit")
     """
     dev = qml.device(device_name, wires=n_qubits, shots=None)
     
-    @qml.qnode(dev, interface='torch', diff_method='parameter-shift')
+    @qml.qnode(dev, interface='torch', diff_method='adjoint')
     def circuit(inputs, weights, crx_weights):
         # inputs: vector đặc trưng có chiều dài n_qubits
         # weights: tham số cho các cổng RZ, RY. Shape: [n_layers, n_qubits, 3]

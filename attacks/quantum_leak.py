@@ -44,7 +44,7 @@ class ModelExtraction(ABC):
 
     def _create_a1_circuit(self):
         dev = qml.device(self.circuit_device, wires=self.n_qubits)
-        @qml.qnode(dev, interface="torch", diff_method="parameter-shift")
+        @qml.qnode(dev, interface="torch", diff_method="adjoint")
         def circuit(inputs, weights, crx_weights=None):
             qml.AmplitudeEmbedding(inputs, wires=range(self.n_qubits), normalize=True)
             param_idx = 0
@@ -64,7 +64,7 @@ class ModelExtraction(ABC):
 
     def _create_a2_circuit(self):
         dev = qml.device(self.circuit_device, wires=self.n_qubits)
-        @qml.qnode(dev, interface="torch", diff_method="parameter-shift")
+        @qml.qnode(dev, interface="torch", diff_method="adjoint")
         def circuit(inputs,  weights, crx_weights=None):
             qml.AmplitudeEmbedding(inputs, wires=range(self.n_qubits), normalize=True)
             param_idx = 0
