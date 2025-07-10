@@ -17,10 +17,10 @@ def create_circuit14(n_qubits, n_layers, device_name="lightning.qubit"):
     # Với n_qubits=6, crx_per_layer = 5 + 1 + 2 = 8.
     crx_per_layer = (n_qubits - 1) + 1 + 2
 
-    @qml.qnode(dev, interface='torch', diff_method='parameter-shift') 
+    @qml.qnode(dev, interface='torch', diff_method='adjoint') 
     def circuit_14(inputs, weights, crx_weights):
         # inputs là vector đã được chuẩn hóa, có chiều dài 2^n_qubits
-        qml.AmplitudeEmbedding(inputs, wires=range(n_qubits), normalize=True, pad_with=0.)
+        qml.AngleEmbedding(inputs, wires=range(n_qubits), rotation='Y')
         
         for l in range(n_layers):
             # Lớp các cổng xoay một qubit
