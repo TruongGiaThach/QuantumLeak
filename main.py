@@ -157,26 +157,25 @@ def run_leak_experiment(model_type="basic_qnn"):
     cloud_leak = CloudLeak(victim_model, n_qubits=N_LEAK_QUBITS, query_budget=LEAK_QUERY_BUDGET, device=DEVICE, save_path=QUANTUM_LEAK_SAVE_PATH, circuit_device=QUANTUM_DEVICE)
     quantum_leak = QuantumLeak(victim_model, n_qubits=N_LEAK_QUBITS, query_budget=LEAK_QUERY_BUDGET, n_committee=LEAK_N_COMMITTEE, device=DEVICE, save_path=QUANTUM_LEAK_SAVE_PATH, circuit_device=QUANTUM_DEVICE)
 
-    # Query cho QuantumLeak bên trong train
-    print("Training CloudLeak Single-N (Noisy)...")
-    single_n_model, single_n_history = cloud_leak.train(in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture=architecture, loss_type='nll', add_noise=True)
-    single_n_metrics = cloud_leak.evaluate(single_n_model, test_loader)
-    print(f"CloudLeak Single-N Metrics: Accuracy: {single_n_metrics['accuracy']:.2f}%, Precision: {single_n_metrics['precision']:.2f}, Recall: {single_n_metrics['recall']:.2f}, F1: {single_n_metrics['f1']:.2f}")
+    # print("Training CloudLeak Single-N (Noisy)...")
+    # single_n_model, single_n_history = cloud_leak.train(in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture=architecture, loss_type='nll', add_noise=True)
+    # single_n_metrics = cloud_leak.evaluate(single_n_model, test_loader)
+    # print(f"CloudLeak Single-N Metrics: Accuracy: {single_n_metrics['accuracy']:.2f}%, Precision: {single_n_metrics['precision']:.2f}, Recall: {single_n_metrics['recall']:.2f}, F1: {single_n_metrics['f1']:.2f}")
 
-    print("Training CloudLeak Single-H (Noisy)...")
-    single_h_model, single_h_history = cloud_leak.train(in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture=architecture, loss_type='huber', add_noise=True)
-    single_h_metrics = cloud_leak.evaluate(single_h_model, test_loader)
-    print(f"CloudLeak Single-H Metrics: Accuracy: {single_h_metrics['accuracy']:.2f}%, Precision: {single_h_metrics['precision']:.2f}, Recall: {single_h_metrics['recall']:.2f}, F1: {single_h_metrics['f1']:.2f}")
+    # print("Training CloudLeak Single-H (Noisy)...")
+    # single_h_model, single_h_history = cloud_leak.train(in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture=architecture, loss_type='huber', add_noise=True)
+    # single_h_metrics = cloud_leak.evaluate(single_h_model, test_loader)
+    # print(f"CloudLeak Single-H Metrics: Accuracy: {single_h_metrics['accuracy']:.2f}%, Precision: {single_h_metrics['precision']:.2f}, Recall: {single_h_metrics['recall']:.2f}, F1: {single_h_metrics['f1']:.2f}")
 
-    print("Training CloudLeak Single-N (Clean)...")
-    single_n_clean_model, single_n_clean_history = cloud_leak.train(in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture=architecture, loss_type='nll', add_noise=False)
-    single_n_clean_metrics = cloud_leak.evaluate(single_n_clean_model, test_loader)
-    print(f"CloudLeak Single-N Clean Metrics: Accuracy: {single_n_clean_metrics['accuracy']:.2f}%, Precision: {single_n_clean_metrics['precision']:.2f}, Recall: {single_n_clean_metrics['recall']:.2f}, F1: {single_n_clean_metrics['f1']:.2f}")
+    # print("Training CloudLeak Single-N (Clean)...")
+    # single_n_clean_model, single_n_clean_history = cloud_leak.train(in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture=architecture, loss_type='nll', add_noise=False)
+    # single_n_clean_metrics = cloud_leak.evaluate(single_n_clean_model, test_loader)
+    # print(f"CloudLeak Single-N Clean Metrics: Accuracy: {single_n_clean_metrics['accuracy']:.2f}%, Precision: {single_n_clean_metrics['precision']:.2f}, Recall: {single_n_clean_metrics['recall']:.2f}, F1: {single_n_clean_metrics['f1']:.2f}")
 
-    print("Training CloudLeak Single-H (Clean)...")
-    single_h_clean_model, single_h_clean_history = cloud_leak.train(in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture=architecture, loss_type='huber', add_noise=False)
-    single_h_clean_metrics = cloud_leak.evaluate(single_h_clean_model, test_loader)
-    print(f"CloudLeak Single-H Clean Metrics: Accuracy: {single_h_clean_metrics['accuracy']:.2f}%, Precision: {single_h_clean_metrics['precision']:.2f}, Recall: {single_h_clean_metrics['recall']:.2f}, F1: {single_h_clean_metrics['f1']:.2f}")
+    # print("Training CloudLeak Single-H (Clean)...")
+    # single_h_clean_model, single_h_clean_history = cloud_leak.train(in_domain_loader, out_of_domain_loader, n_epochs=N_LEAK_EPOCHS, batch_size=LEAK_BATCH_SIZE, architecture=architecture, loss_type='huber', add_noise=False)
+    # single_h_clean_metrics = cloud_leak.evaluate(single_h_clean_model, test_loader)
+    # print(f"CloudLeak Single-H Clean Metrics: Accuracy: {single_h_clean_metrics['accuracy']:.2f}%, Precision: {single_h_clean_metrics['precision']:.2f}, Recall: {single_h_clean_metrics['recall']:.2f}, F1: {single_h_clean_metrics['f1']:.2f}")
 
     # QuantumLeak: Truy vấn và huấn luyện bên trong train
     print("Training QuantumLeak Ens-N...")
@@ -249,11 +248,11 @@ def run_leak_experiment(model_type="basic_qnn"):
 
 if __name__ == "__main__":
     # run_basic_qnn_experiment()
-    run_circuit14_experiment()
-    run_pure_qnn_circuit14_experiment()
+    # run_circuit14_experiment()
+    # run_pure_qnn_circuit14_experiment()
     # run_transfer_learning_experiment()
     # run_quanv_experiment()
-    run_leak_experiment("basic_qnn")
+    # run_leak_experiment("basic_qnn")
     run_leak_experiment("circuit14")
     run_leak_experiment("transfer_learning")
     run_leak_experiment("pure_circuit14")

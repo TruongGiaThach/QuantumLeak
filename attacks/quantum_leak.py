@@ -111,9 +111,9 @@ class ModelExtraction(ABC):
         model.eval()
         images = images.to(device)
         with torch.no_grad():
-            outputs = model(images)
-            prob_class_1 = outputs
-            prob_class_0 = 1 - prob_class_1
+            logits = model(images)
+            prob_class_1 = torch.sigmoid(logits)
+            prob_class_0 = 1.0 - prob_class_1
             prob_vectors = torch.cat([prob_class_0, prob_class_1], dim=1)
         return prob_vectors
 
@@ -135,7 +135,7 @@ class ModelExtraction(ABC):
         gate_2q_noise = 0.0244 
         crosstalk_factor = 1.2 
         if not add_noise:
-            spam_error = gate_1q_error = gate_2q_error = 0.0
+            spam_noise = gate_1q_noise = gate_2q_noise = 0.0
             crosstalk_factor = 1.0
         with torch.no_grad():
             for round in range(n_rounds):
@@ -144,7 +144,7 @@ class ModelExtraction(ABC):
                     inputs = batch[0].to(self.device)
                     outputs = self.qnnaas_predict(self.victim_model, inputs, self.device)
                     if add_noise:
-                        base_noise_scale = spam_error + gate_1q_error + gate_2q_error
+                        base_noise_scale = spam_noise + gate_1q_noise + gate_2q_noise
                         total_noise_scale = base_noise_scale * crosstalk_factor
                         # Tạo nhiễu ngẫu nhiên theo phân phối chuẩn
                         noise = torch.randn_like(outputs) * total_noise_scale
@@ -355,7 +355,24 @@ class QuantumLeak(ModelExtraction):
         self.n_committee = n_committee
         self.ensemble_models = []
 
-    def train(self, query_dataset, out_of_domain_loader, n_epochs=30, batch_size=8, architecture='L2', loss_type='huber'):
+    def train(self, in_domain_loader, out_of_domain_loader, n_epochs=30, batch_size=8, architecture='L2', loss_type='huber'):
+        """
+        Train QuantumLeak ensemble by querying the victim model and training on the resulting dataset.
+        Args:
+            in_domain_loader: DataLoader with in-domain images (6000 samples).
+            out_of_domain_loader: DataLoader with out-of-domain images (not used in QuantumLeak).
+            n_epochs: Number of training epochs (100 as per paper).
+            batch_size: Batch size for training.
+            architecture: VQC architecture ('L1', 'L2', 'L3', 'A1', 'A2').
+            loss_type: Loss function ('nll' or 'huber').
+        Returns:
+            ensemble_models: List of trained QNN models.
+            history: Training history (loss and accuracy).
+        """
+        # Query victim model to get labeled dataset
+        print("Querying victim model for QuantumLeak training...")
+        query_dataset = self.query_victim(in_domain_loader, n_rounds=3, add_noise=True)
+        print(f"Obtained query dataset with {len(query_dataset)} batches.")
         return self.train_ensemble(query_dataset, n_epochs, batch_size, architecture, loss_type, self.n_committee)
 
     def train_ensemble(self, query_dataset, n_epochs=30, batch_size=8, architecture='L2', loss_type='huber', n_committee=None , learn_rate=0.001):
