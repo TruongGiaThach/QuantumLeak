@@ -10,7 +10,7 @@ def train_model(model, train_loader, val_loader, device, criterion, n_epochs, le
     os.makedirs(save_path, exist_ok=True)
     
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     
     history = {
         'train_loss': [],

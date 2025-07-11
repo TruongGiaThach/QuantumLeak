@@ -130,10 +130,13 @@ class ModelExtraction(ABC):
         self.victim_model.eval()
         query_dataset = []
         samples_per_round = self.query_budget // n_rounds
-        spam_noise = 0.0054 if add_noise else 0.0
-        gate_1q_noise = 0.00177 if add_noise else 0.0
-        gate_2q_noise = 0.0287 if add_noise else 0.0
-        crosstalk_noise = 0.2 if add_noise else 0.0
+        spam_noise = 0.0034     
+        gate_1q_noise = 0.00197 
+        gate_2q_noise = 0.0244 
+        crosstalk_factor = 1.2 
+        if not add_noise:
+            spam_error = gate_1q_error = gate_2q_error = 0.0
+            crosstalk_factor = 1.0
         with torch.no_grad():
             for round in range(n_rounds):
                 samples_collected = 0
@@ -141,8 +144,10 @@ class ModelExtraction(ABC):
                     inputs = batch[0].to(self.device)
                     outputs = self.qnnaas_predict(self.victim_model, inputs, self.device)
                     if add_noise:
-                        noise_scale = spam_noise + gate_1q_noise + gate_2q_noise + crosstalk_noise
-                        noise = torch.randn_like(outputs) * noise_scale
+                        base_noise_scale = spam_error + gate_1q_error + gate_2q_error
+                        total_noise_scale = base_noise_scale * crosstalk_factor
+                        # Tạo nhiễu ngẫu nhiên theo phân phối chuẩn
+                        noise = torch.randn_like(outputs) * total_noise_scale
                         noisy_outputs = outputs + noise
                         noisy_outputs = torch.clamp(noisy_outputs, 0, 1)
                     else:
@@ -367,9 +372,11 @@ class QuantumLeak(ModelExtraction):
             model = self.get_substitute_qnn(architecture)
             optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
             subset_indices = np.random.choice(dataset_size, subset_size, replace=True)
-            subset_data = [query_dataset[idx] for idx in subset_indices]
-            inputs = np.concatenate([item[0] for item in subset_data])
-            outputs = np.concatenate([item[1][:, 1:2] for item in subset_data])
+            # Extract subset data from query_dataset (list of tuples)
+            inputs = np.concatenate([query_dataset[idx][0] for idx in subset_indices])
+            outputs = np.concatenate([query_dataset[idx][1][:, 1:2] for idx in subset_indices])
+            
+            # Create TensorDataset for the subset
             subset_dataset = TensorDataset(
                 torch.tensor(inputs, dtype=torch.float32),
                 torch.tensor(outputs, dtype=torch.float32).view(-1, 1)
