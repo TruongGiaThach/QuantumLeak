@@ -134,7 +134,7 @@ def run_leak_experiment(model_type="basic_qnn"):
     _, test_loader = get_cq_dataloaders(pipeline, batch_size=LEAK_BATCH_SIZE, device=torch.device(DEVICE))
     in_domain_loader = create_in_domain_loader(pipeline, batch_size=LEAK_BATCH_SIZE, n_samples=LEAK_QUERY_BUDGET, device=torch.device(DEVICE))
     out_of_domain_loader = create_out_of_domain_loader(pipeline, batch_size=LEAK_BATCH_SIZE, n_samples=3000)
-    architecture = "L3"
+    architecture = "L2"
     if model_type == "basic_qnn":
         quantum_circuit = create_quantum_circuit()
         victim_model = BasicQNN(N_QUBITS, N_LAYERS, quantum_circuit).to(DEVICE)
@@ -249,8 +249,8 @@ def run_leak_experiment(model_type="basic_qnn"):
 
 if __name__ == "__main__":
     # run_basic_qnn_experiment()
-    # run_pure_qnn_circuit14_experiment()
-    # run_circuit14_experiment()
+    run_circuit14_experiment()
+    run_pure_qnn_circuit14_experiment()
     # run_transfer_learning_experiment()
     # run_quanv_experiment()
     run_leak_experiment("basic_qnn")
