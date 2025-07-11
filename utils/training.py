@@ -98,8 +98,13 @@ def evaluate_model_with_metrics(models, data_loader, device, criterion=None, is_
                     probs = torch.sigmoid(outputs).squeeze()
                     predicted = (probs >= 0.5).float()
                     ensemble_preds_tensor.append(predicted)
-                
+                # Tập hợp các dự đoán
+                # Giả sử có 3 mô hình và batch_size=8,
+                # stacked_preds sẽ có shape (8, 3)
                 stacked_preds = torch.stack(ensemble_preds_tensor, dim=1)
+                # Lấy nhãn xuất hiện nhiều nhất
+                # torch.mode tìm giá trị phổ biến nhất dọc theo một chiều (dim=1)
+                # predicted sẽ là nhãn cuối cùng của ensemble
                 predicted, _ = torch.mode(stacked_preds, dim=1)
             else: # Single model
                 outputs = models[0](inputs)

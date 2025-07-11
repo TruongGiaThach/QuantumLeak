@@ -117,13 +117,15 @@ class ModelExtraction(ABC):
             prob_vectors = torch.cat([prob_class_0, prob_class_1], dim=1)
         return prob_vectors
 
-    def query_victim(self, data_loader, n_rounds=3, add_noise=True):
+    def query_victim(self, data_loader, n_rounds=3, add_noise=True, use_defense=False, defense_params=None):
         """
         Truy vấn Victim Model với tùy chọn thêm nhiễu NISQ.
         Args:
             data_loader: DataLoader chứa ảnh (chỉ ảnh, không nhãn).
             n_rounds: Số vòng truy vấn.
             add_noise: Có thêm nhiễu NISQ hay không.
+            use_defense: Sử dụng biện pháp phòng ngừa nhiễu hay không.
+            defense_params: Tham số cho biện pháp phòng ngừa nhiễu.
         Returns:
             query_dataset: Danh sách các cặp (inputs, noisy_outputs).
         """
@@ -137,25 +139,51 @@ class ModelExtraction(ABC):
         if not add_noise:
             spam_noise = gate_1q_noise = gate_2q_noise = 0.0
             crosstalk_factor = 1.0
+
+        samples_collected = 0
+        pbar = tqdm(total=self.query_budget, desc=f"Querying victim (Budget: {self.query_budget})")
         with torch.no_grad():
-            for round in range(n_rounds):
-                samples_collected = 0
-                for batch in tqdm(data_loader, desc=f"Query round {round + 1}/{n_rounds}"):
-                    inputs = batch[0].to(self.device)
-                    outputs = self.qnnaas_predict(self.victim_model, inputs, self.device)
-                    if add_noise:
-                        base_noise_scale = spam_noise + gate_1q_noise + gate_2q_noise
-                        total_noise_scale = base_noise_scale * crosstalk_factor
-                        # Tạo nhiễu ngẫu nhiên theo phân phối chuẩn
-                        noise = torch.randn_like(outputs) * total_noise_scale
-                        noisy_outputs = outputs + noise
-                        noisy_outputs = torch.clamp(noisy_outputs, 0, 1)
-                    else:
-                        noisy_outputs = outputs
-                    query_dataset.append((inputs.cpu().numpy(), noisy_outputs.cpu().numpy()))
-                    samples_collected += inputs.size(0)
-                    if samples_collected >= samples_per_round:
-                        break
+            # Duyệt qua data_loader cho đến khi đủ query_budget
+            for batch in data_loader:
+                # Nếu đã đủ, dừng lại
+                if samples_collected >= self.query_budget:
+                    break
+
+                inputs = batch[0].to(self.device)
+                
+                # Đảm bảo không lấy quá budget trong batch cuối cùng
+                remaining_budget = self.query_budget - samples_collected
+                if inputs.size(0) > remaining_budget:
+                    inputs = inputs[:remaining_budget]
+                
+                # --- Lấy dự đoán và áp dụng nhiễu ---
+                outputs = self.qnnaas_predict(self.victim_model, inputs, self.device)
+
+                if use_defense:
+                    if defense_params is None: defense_params = {}
+                    outputs = add_structured_noise(outputs, inputs, **defense_params)
+
+                if add_noise:
+                    base_noise_scale = spam_noise + gate_1q_noise + gate_2q_noise
+                    total_noise_scale = base_noise_scale * crosstalk_factor
+                    noise = torch.randn_like(outputs) * total_noise_scale
+                    noisy_outputs = outputs + noise
+                    noisy_outputs = torch.clamp(noisy_outputs, 0, 1)
+                else:
+                    noisy_outputs = outputs
+
+                # Lưu kết quả theo từng batch
+                query_dataset.append((inputs.cpu().numpy(), noisy_outputs.cpu().numpy()))
+                
+                # Cập nhật số lượng mẫu đã thu thập và thanh tiến trình
+                num_in_batch = inputs.size(0)
+                samples_collected += num_in_batch
+                pbar.update(num_in_batch)
+
+        pbar.close()
+        if samples_collected < self.query_budget:
+            print(f"\nWarning: Query budget of {self.query_budget} not fully met. Collected {samples_collected} samples.")
+
         return query_dataset
 
     def generate_adversarial_samples(self, substitute_model, inputs, epsilon=0.1):
@@ -377,28 +405,48 @@ class QuantumLeak(ModelExtraction):
 
     def train_ensemble(self, query_dataset, n_epochs=30, batch_size=8, architecture='L2', loss_type='huber', n_committee=None , learn_rate=0.001):
         n_committee = n_committee or self.n_committee
-        criterion = HuberLoss(delta=0.5) if loss_type == 'huber' else nn.BCEWithLogitsLoss()
-        dataset_size = len(query_dataset)
+        criterion = HuberLoss(delta=0.5) if loss_type == 'huber' else nn.BCEWithLogitsLoss()\
+
+        # 1. Gộp toàn bộ dữ liệu truy vấn (Dataset D) lại thành một mảng lớn
+        all_inputs = np.concatenate([item[0] for item in query_dataset])
+        all_outputs = np.concatenate([item[1][:, 1:2] for item in query_dataset])
+        dataset_size = all_inputs.shape[0] # Đây chính là NQ (query_budget)
+
+        # Kiểm tra xem NQ có chia hết cho Nc không
+        if dataset_size % n_committee != 0:
+            print(f"Warning: Query budget {dataset_size} is not divisible by n_committee {n_committee}. "
+                f"Subset sizes will be rounded.")
+
+        # 2. Xác định kích thước của mỗi tập con
+        # subset_size = NQ / Nc
         subset_size = dataset_size // n_committee
+
+        print(f"\nStarting ensemble training with Bagging:")
+        print(f"  - Total query dataset size (NQ): {dataset_size}")
+        print(f"  - Number of ensemble members (Nc): {n_committee}")
+        print(f"  - Size of each bootstrap subset (NQ/Nc): {subset_size}")
+
         ensemble_models = []
         history = {'train_loss': [], 'train_accuracy': []}
         
-        total_steps = n_committee * n_epochs
-        pbar = tqdm(total=total_steps, desc="Training QuantumLeak Ensemble")
         for i in range(n_committee):
+            print(f"\n--- Training Ensemble Member {i+1}/{n_committee} ---")
             model = self.get_substitute_qnn(architecture)
             optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
+
+            # 3. Tạo tập con Di bằng cách lấy mẫu có lặp lại từ D
             subset_indices = np.random.choice(dataset_size, subset_size, replace=True)
             # Extract subset data from query_dataset (list of tuples)
-            inputs = np.concatenate([query_dataset[idx][0] for idx in subset_indices])
-            outputs = np.concatenate([query_dataset[idx][1][:, 1:2] for idx in subset_indices])
+            subset_inputs = all_inputs[subset_indices]
+            subset_outputs = all_outputs[subset_indices]
             
             # Create TensorDataset for the subset
             subset_dataset = TensorDataset(
-                torch.tensor(inputs, dtype=torch.float32),
-                torch.tensor(outputs, dtype=torch.float32).view(-1, 1)
+                torch.tensor(subset_inputs, dtype=torch.float32),
+                torch.tensor(subset_outputs, dtype=torch.float32).view(-1, 1)
             )
             subset_loader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=True)
+            pbar = tqdm(range(n_epochs), desc=f"Member {i+1}")
             for epoch in range(n_epochs):
                 model.train()
                 running_loss = 0.0
@@ -416,15 +464,17 @@ class QuantumLeak(ModelExtraction):
                     predicted = (torch.sigmoid(outputs) >= 0.5).float().squeeze()
                     target_labels = (targets >= 0.5).float().squeeze()
                     total += targets.size(0)
-                    correct += (predicted == target_labels).sum().item()
-                avg_loss = running_loss / len(subset_loader)
-                accuracy = 100 * correct / total
+                    if total > 0:
+                        correct += (predicted == target_labels).sum().item()
+                
+                avg_loss = running_loss / len(subset_loader) if len(subset_loader) > 0 else 0
+                accuracy = 100 * correct / total if total > 0 else 0
                 history['train_loss'].append(avg_loss)
                 history['train_accuracy'].append(accuracy)
                 pbar.update(1)
-                pbar.set_postfix(committee=f"{i+1}/{n_committee}", epoch=f"{epoch+1}/{n_epochs}", loss=f"{avg_loss:.4f}", accuracy=f"{accuracy:.2f}%")
-            ensemble_models.append(model)
+                pbar.set_postfix(loss=f"{avg_loss:.4f}", accuracy=f"{accuracy:.2f}%")
             pbar.close()
+            ensemble_models.append(model)
         self.ensemble_models = ensemble_models
         return ensemble_models, history
 
